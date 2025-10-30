@@ -8,6 +8,8 @@ mod tests {
         assert_eq!(repo.name, "test");
         assert_eq!(repo.url, "https://github.com/user/repo.git");
         assert_eq!(repo.auth_type, AuthType::Default);
+        assert_eq!(repo.auth_token, "");
+        assert_eq!(repo.ssh_key_path, "");
     }
 
     #[test]
@@ -20,6 +22,8 @@ mod tests {
         assert_eq!(repo.name, "test");
         assert_eq!(repo.url, "https://github.com/user/repo.git");
         assert_eq!(repo.auth_type, AuthType::SSH);
+        assert_eq!(repo.auth_token, "");
+        assert_eq!(repo.ssh_key_path, "");
     }
 
     #[test]
@@ -59,5 +63,43 @@ mod tests {
         assert!(!RepoConfig::validate_repository_url("github.com/user/repo.git"));
         assert!(!RepoConfig::validate_repository_url("ftp://github.com/user/repo.git"));
         assert!(!RepoConfig::validate_repository_url(""));
+    }
+
+    #[test]
+    fn test_auth_type_default() {
+        let repo = RepositoryInfo::new("test".to_string(), "https://github.com/user/repo.git".to_string());
+        assert_eq!(repo.auth_type, AuthType::Default);
+    }
+
+    #[test]
+    fn test_auth_type_ssh() {
+        let repo = RepositoryInfo::with_auth(
+            "test".to_string(),
+            "https://github.com/user/repo.git".to_string(),
+            AuthType::SSH
+        );
+        assert_eq!(repo.auth_type, AuthType::SSH);
+    }
+
+    #[test]
+    fn test_auth_type_token() {
+        let repo = RepositoryInfo::with_auth(
+            "test".to_string(),
+            "https://github.com/user/repo.git".to_string(),
+            AuthType::Token
+        );
+        assert_eq!(repo.auth_type, AuthType::Token);
+    }
+
+    #[test]
+    fn test_repo_config_name_default() {
+        let config = RepoConfig::new();
+        assert_eq!(config.config_name, "default");
+    }
+
+    #[test]
+    fn test_repo_config_name_custom() {
+        let config = RepoConfig::with_name("custom".to_string());
+        assert_eq!(config.config_name, "custom");
     }
 }
