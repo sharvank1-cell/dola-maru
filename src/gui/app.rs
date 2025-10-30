@@ -10,6 +10,7 @@ use crate::core::git_operations::{
     verify_authentication,
     clone_all_repositories
 };
+use crate::gui::commit_history_viewer::CommitHistoryViewer;
 use std::sync::{Arc, Mutex};
 use webbrowser;
 
@@ -57,12 +58,15 @@ pub struct MultiRepoPusherApp {
     edit_account_auth_type: AuthType,
     edit_account_token: String,
     edit_account_ssh_key: String,
+    // Commit history viewer
+    commit_history_viewer: CommitHistoryViewer,
 }
 
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
     Commit,
     Repositories,
+    CommitHistory,
     Advanced,
 }
 
@@ -96,7 +100,7 @@ impl MultiRepoPusherApp {
         drop(config_lock);
         
         Self {
-            config,
+            config: config.clone(),
             commit_message: "Auto commit".to_string(),
             branch_name: "main".to_string(),
             tag_name: String::new(),
@@ -139,6 +143,8 @@ impl MultiRepoPusherApp {
             edit_account_auth_type: AuthType::Default,
             edit_account_token: String::new(),
             edit_account_ssh_key: String::new(),
+            // Commit history viewer
+            commit_history_viewer: CommitHistoryViewer::new(config.clone()),
         }
     }
     
@@ -663,6 +669,7 @@ impl eframe::App for MultiRepoPusherApp {
                 
                 ui.selectable_value(&mut self.active_tab, Tab::Commit, "📝 Commit");
                 ui.selectable_value(&mut self.active_tab, Tab::Repositories, "📂 Repositories");
+                ui.selectable_value(&mut self.active_tab, Tab::CommitHistory, "📜 Commit History");
                 ui.selectable_value(&mut self.active_tab, Tab::Advanced, "⚙️ Advanced");
             });
             
@@ -671,6 +678,7 @@ impl eframe::App for MultiRepoPusherApp {
             match self.active_tab {
                 Tab::Commit => self.render_commit_tab(ui),
                 Tab::Repositories => self.render_repositories_tab(ui),
+                Tab::CommitHistory => self.commit_history_viewer.render(ui),
                 Tab::Advanced => self.render_advanced_tab(ui),
             }
             
