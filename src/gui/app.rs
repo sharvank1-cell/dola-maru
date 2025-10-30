@@ -132,6 +132,13 @@ impl MultiRepoPusherApp {
             setup_completed: !is_first_time,
             // OAuth fields
             oauth_token: String::new(),
+            // Account selection and editing fields
+            selected_account_index: 0,
+            edit_account_name: String::new(),
+            edit_account_url: String::new(),
+            edit_account_auth_type: AuthType::Default,
+            edit_account_token: String::new(),
+            edit_account_ssh_key: String::new(),
         }
     }
     
@@ -402,6 +409,74 @@ impl MultiRepoPusherApp {
         self.account_token.clear();
         self.account_ssh_key_path.clear();
     }
+    
+    // New function to save account changes
+    fn save_account_changes(&mut self) {
+        if self.edit_account_name.is_empty() || self.edit_account_url.is_empty() {
+            self.status_message = "Please fill in all required fields".to_string();
+            return;
+        }
+        
+        // Validate repository URL
+        if !validate_repository_url(&self.edit_account_url) {
+            self.status_message = "Invalid repository URL format".to_string();
+            return;
+        }
+        
+        // Update the selected account in the config
+        let mut config = self.config.lock().unwrap();
+        if self.selected_account_index < config.repositories.len() {
+            let mut repo_info = RepositoryInfo::with_auth(
+                self.edit_account_name.clone(),
+                self.edit_account_url.clone(),
+                self.edit_account_auth_type.clone(),
+            );
+            
+            // Set authentication details based on type
+            match &self.edit_account_auth_type {
+                AuthType::Token => {
+                    repo_info.auth_token = self.edit_account_token.clone();
+                },
+                AuthType::SSH => {
+                    repo_info.ssh_key_path = self.edit_account_ssh_key.clone();
+                },
+                _ => {}
+            }
+            
+            // Replace the repository at the selected index
+            config.repositories[self.selected_account_index] = repo_info;
+            
+            self.status_message = "Account changes saved successfully".to_string();
+        } else {
+            self.status_message = "Invalid account selection".to_string();
+        }
+    }
+    
+    // New function to delete the selected account
+    fn delete_selected_account(&mut self) {
+        let mut config = self.config.lock().unwrap();
+        if self.selected_account_index < config.repositories.len() {
+            let repo_name = config.repositories[self.selected_account_index].name.clone();
+            config.repositories.remove(self.selected_account_index);
+            
+            // Adjust selected index if needed
+            if !config.repositories.is_empty() && self.selected_account_index >= config.repositories.len() {
+                self.selected_account_index = config.repositories.len() - 1;
+            } else if config.repositories.is_empty() {
+                self.selected_account_index = 0;
+            }
+            
+            // Clear edit fields
+            self.edit_account_name.clear();
+            self.edit_account_url.clear();
+            self.edit_account_token.clear();
+            self.edit_account_ssh_key.clear();
+            
+            self.status_message = format!("Account '{}' deleted successfully", repo_name);
+        } else {
+            self.status_message = "No account selected for deletion".to_string();
+        }
+    }
 }
 
 impl eframe::App for MultiRepoPusherApp {
@@ -430,19 +505,31 @@ impl eframe::App for MultiRepoPusherApp {
                 if repos.is_empty() {
                     ui.label(egui::RichText::new("No accounts configured").weak());
                 } else {
-                    for (_i, repo) in repos.iter().enumerate() {
+                    for (i, repo) in repos.iter().enumerate() {
                         let button = egui::Button::new(
                             egui::RichText::new(&repo.name)
                                 .size(14.0)
                         )
-                        .fill(egui::Color32::from_rgb(50, 50, 70))
+                        .fill(if self.selected_account_index == i {
+                            egui::Color32::from_rgb(90, 90, 150) // Highlight selected account
+                        } else {
+                            egui::Color32::from_rgb(50, 50, 70)
+                        })
                         .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 150)))
                         .rounding(egui::Rounding::same(4.0))
                         .min_size(egui::Vec2::new(ui.available_width() - 10.0, 30.0));
                         
                         if ui.add(button).clicked() {
                             // Handle account selection
+                            self.selected_account_index = i;
                             self.status_message = format!("Selected account: {}", repo.name);
+                            
+                            // Update edit fields with selected account details
+                            self.edit_account_name = repo.name.clone();
+                            self.edit_account_url = repo.url.clone();
+                            self.edit_account_auth_type = repo.auth_type.clone();
+                            self.edit_account_token = repo.auth_token.clone();
+                            self.edit_account_ssh_key = repo.ssh_key_path.clone();
                         }
                         
                         ui.add_space(5.0);
@@ -473,17 +560,79 @@ impl eframe::App for MultiRepoPusherApp {
                 ui.add_space(10.0);
                 
                 if !repos.is_empty() {
-                    let selected_repo = &repos[0]; // For now, show the first account
+                    // Update edit fields when account selection changes
+                    if self.edit_account_name.is_empty() && self.selected_account_index < repos.len() {
+                        let selected_repo = &repos[self.selected_account_index];
+                        self.edit_account_name = selected_repo.name.clone();
+                        self.edit_account_url = selected_repo.url.clone();
+                        self.edit_account_auth_type = selected_repo.auth_type.clone();
+                        self.edit_account_token = selected_repo.auth_token.clone();
+                        self.edit_account_ssh_key = selected_repo.ssh_key_path.clone();
+                    }
+                    
                     ui.label(egui::RichText::new("Name:").strong());
-                    ui.label(&selected_repo.name);
+                    ui.add(egui::TextEdit::singleline(&mut self.edit_account_name).desired_width(ui.available_width() * 0.8));
                     ui.add_space(5.0);
                     
                     ui.label(egui::RichText::new("URL:").strong());
-                    ui.label(&selected_repo.url);
+                    ui.add(egui::TextEdit::singleline(&mut self.edit_account_url).desired_width(ui.available_width() * 0.8));
                     ui.add_space(5.0);
                     
                     ui.label(egui::RichText::new("Auth Type:").strong());
-                    ui.label(format!("{:?}", selected_repo.auth_type));
+                    egui::ComboBox::from_id_source("edit_account_auth_type")
+                        .selected_text(format!("{:?}", self.edit_account_auth_type))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.edit_account_auth_type, AuthType::Default, "Default");
+                            ui.selectable_value(&mut self.edit_account_auth_type, AuthType::SSH, "SSH Key");
+                            ui.selectable_value(&mut self.edit_account_auth_type, AuthType::Token, "Personal Access Token");
+                        });
+                    ui.add_space(5.0);
+                    
+                    // Show auth-specific fields based on selected type
+                    match &self.edit_account_auth_type {
+                        AuthType::Token => {
+                            ui.label(egui::RichText::new("Token:").strong());
+                            ui.add(egui::TextEdit::singleline(&mut self.edit_account_token).password(true).desired_width(ui.available_width() * 0.8));
+                            ui.add_space(5.0);
+                        },
+                        AuthType::SSH => {
+                            ui.label(egui::RichText::new("SSH Key Path:").strong());
+                            ui.add(egui::TextEdit::singleline(&mut self.edit_account_ssh_key).desired_width(ui.available_width() * 0.8));
+                            ui.add_space(5.0);
+                        },
+                        _ => {}
+                    }
+                    
+                    ui.add_space(10.0);
+                    
+                    // Save and Delete buttons
+                    ui.horizontal(|ui| {
+                        let save_button = egui::Button::new(
+                            egui::RichText::new("💾 Save")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(60, 100, 60))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 200, 100)))
+                        .rounding(egui::Rounding::same(4.0))
+                        .min_size(egui::Vec2::new(80.0, 30.0));
+                        
+                        if ui.add(save_button).clicked() {
+                            self.save_account_changes();
+                        }
+                        
+                        let delete_button = egui::Button::new(
+                            egui::RichText::new("🗑 Delete")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(150, 80, 80))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 150, 150)))
+                        .rounding(egui::Rounding::same(4.0))
+                        .min_size(egui::Vec2::new(80.0, 30.0));
+                        
+                        if ui.add(delete_button).clicked() {
+                            self.delete_selected_account();
+                        }
+                    });
                 } else {
                     ui.label(egui::RichText::new("No account selected").weak());
                 }
