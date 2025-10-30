@@ -11,6 +11,7 @@ use crate::core::git_operations::{
     clone_all_repositories
 };
 use std::sync::{Arc, Mutex};
+use webbrowser;
 
 pub struct MultiRepoPusherApp {
     config: Arc<Mutex<RepoConfig>>,
@@ -44,6 +45,18 @@ pub struct MultiRepoPusherApp {
     new_group_name: String,
     new_group_description: String,
     selected_group: String,
+    // First-time setup fields
+    show_first_time_setup: bool,
+    setup_completed: bool,
+    // OAuth fields
+    oauth_token: String,
+    // Account selection and editing fields
+    selected_account_index: usize,
+    edit_account_name: String,
+    edit_account_url: String,
+    edit_account_auth_type: AuthType,
+    edit_account_token: String,
+    edit_account_ssh_key: String,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -75,6 +88,12 @@ impl MultiRepoPusherApp {
         visuals.selection.bg_fill = egui::Color32::from_rgb(90, 90, 150);
         cc.egui_ctx.set_visuals(visuals);
         
+        // Check if this is first time setup
+        let config_lock = config.lock().unwrap();
+        let is_first_time = config_lock.repositories.is_empty() || 
+            (config_lock.repositories.len() == 1 && 
+             config_lock.repositories[0].url.contains("YOUR_USERNAME"));
+        drop(config_lock);
         
         Self {
             config,
@@ -108,6 +127,11 @@ impl MultiRepoPusherApp {
             new_group_name: String::new(),
             new_group_description: String::new(),
             selected_group: String::new(),
+            // First-time setup fields
+            show_first_time_setup: is_first_time,
+            setup_completed: !is_first_time,
+            // OAuth fields
+            oauth_token: String::new(),
         }
     }
     
@@ -360,8 +384,13 @@ impl MultiRepoPusherApp {
             return;
         }
         
+        // Show loading indicator
+        self.status_message = "Validating account and saving configuration...".to_string();
+        self.is_operation_running = true;
+        
+        // In a real implementation, you would validate the account credentials here
         // For now, we'll just show a success message
-        // In a real implementation, this would save the account details
+        self.is_operation_running = false;
         self.status_message = format!("Account '{}' added successfully", self.account_username);
         
         // Close the form
@@ -379,6 +408,86 @@ impl eframe::App for MultiRepoPusherApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Update animation timer
         self.animation_timer += ctx.input(|i| i.stable_dt);
+        
+        // Show first-time setup modal if needed
+        if self.show_first_time_setup {
+            self.render_first_time_setup(ctx);
+            return;
+        }
+        
+        // Create a side panel layout
+        egui::SidePanel::left("account_panel")
+            .resizable(true)
+            .default_width(200.0)
+            .show(ctx, |ui| {
+                ui.heading("👥 Accounts");
+                ui.separator();
+                
+                // Account selection
+                let config = self.config.clone();
+                let repos = config.lock().unwrap().repositories.clone();
+                
+                if repos.is_empty() {
+                    ui.label(egui::RichText::new("No accounts configured").weak());
+                } else {
+                    for (_i, repo) in repos.iter().enumerate() {
+                        let button = egui::Button::new(
+                            egui::RichText::new(&repo.name)
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(50, 50, 70))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 150)))
+                        .rounding(egui::Rounding::same(4.0))
+                        .min_size(egui::Vec2::new(ui.available_width() - 10.0, 30.0));
+                        
+                        if ui.add(button).clicked() {
+                            // Handle account selection
+                            self.status_message = format!("Selected account: {}", repo.name);
+                        }
+                        
+                        ui.add_space(5.0);
+                    }
+                }
+                
+                ui.add_space(10.0);
+                
+                // Add account button
+                let add_account_button = egui::Button::new(
+                    egui::RichText::new("➕ Add Account")
+                        .size(14.0)
+                )
+                .fill(egui::Color32::from_rgb(60, 100, 60))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 200, 100)))
+                .rounding(egui::Rounding::same(6.0))
+                .min_size(egui::Vec2::new(ui.available_width() - 10.0, 35.0));
+                
+                if ui.add(add_account_button).clicked() {
+                    self.show_account_form = true;
+                }
+                
+                ui.add_space(10.0);
+                
+                // Show account details for selected account
+                ui.separator();
+                ui.heading("📋 Account Details");
+                ui.add_space(10.0);
+                
+                if !repos.is_empty() {
+                    let selected_repo = &repos[0]; // For now, show the first account
+                    ui.label(egui::RichText::new("Name:").strong());
+                    ui.label(&selected_repo.name);
+                    ui.add_space(5.0);
+                    
+                    ui.label(egui::RichText::new("URL:").strong());
+                    ui.label(&selected_repo.url);
+                    ui.add_space(5.0);
+                    
+                    ui.label(egui::RichText::new("Auth Type:").strong());
+                    ui.label(format!("{:?}", selected_repo.auth_type));
+                } else {
+                    ui.label(egui::RichText::new("No account selected").weak());
+                }
+            });
         
         egui::CentralPanel::default().show(ctx, |ui| {
             // Header with title and styling
@@ -878,16 +987,16 @@ impl MultiRepoPusherApp {
     // New function to handle the account modal rendering
     fn render_account_modal(&mut self, ctx: &egui::Context) {
         if self.show_account_form {
-            let mut show_account_form = self.show_account_form;
+            let mut open = self.show_account_form;
             egui::Window::new("👤 Add New Account")
-                .open(&mut show_account_form)
+                .open(&mut open)
                 .resizable(true)
                 .default_width(450.0)
                 .default_height(350.0)
                 .show(ctx, |ui| {
                     self.render_account_form(ui);
                 });
-            self.show_account_form = show_account_form;
+            self.show_account_form = open;
         }
     }
     
@@ -898,6 +1007,38 @@ impl MultiRepoPusherApp {
             ui.label(egui::RichText::new("Enter your GitHub account information").weak().size(13.0));
             
             ui.add_space(15.0);
+            
+            // Show loading indicator if operation is running
+            if self.is_operation_running {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new().size(20.0));
+                    ui.label(egui::RichText::new(&self.status_message).size(14.0));
+                });
+                ui.add_space(20.0);
+                return;
+            }
+            
+            // Show success or error message if there is one
+            if !self.status_message.is_empty() && self.status_message != "Ready" {
+                if self.status_message.contains("successfully") {
+                    // Success message
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("✓").color(egui::Color32::GREEN));
+                            ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::GREEN));
+                        });
+                    });
+                } else if self.status_message != "Validating account and saving configuration..." {
+                    // Error message (but not the temporary loading message)
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("⚠").color(egui::Color32::YELLOW));
+                            ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::YELLOW));
+                        });
+                    });
+                }
+                ui.add_space(10.0);
+            }
             
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
@@ -991,9 +1132,9 @@ impl MultiRepoPusherApp {
     // New function to handle the group modal rendering
     fn render_group_modal(&mut self, ctx: &egui::Context) {
         if self.show_group_form {
-            let mut show_group_form = self.show_group_form;
+            let mut open = self.show_group_form;
             egui::Window::new("📁 Create New Repository Group")
-                .open(&mut show_group_form)
+                .open(&mut open)
                 .resizable(true)
                 .default_width(400.0)
                 .default_height(250.0)
@@ -1055,7 +1196,7 @@ impl MultiRepoPusherApp {
                         });
                     });
                 });
-            self.show_group_form = show_group_form;
+            self.show_group_form = open;
         }
     }
     
@@ -1183,5 +1324,280 @@ impl MultiRepoPusherApp {
                 });
             });
         });
+    }
+    
+    // New function to handle the first-time setup modal
+    fn render_first_time_setup(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_first_time_setup;
+        egui::Window::new("Welcome to Multi-Repo Pusher")
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .default_width(500.0)
+            .default_height(450.0)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.heading("🚀 Welcome to Multi-Repo Pusher!");
+                    ui.add_space(10.0);
+                    ui.label("Let's set up your account to get started.");
+                    ui.add_space(20.0);
+                });
+                
+                // Show loading indicator if operation is running
+                if self.is_operation_running {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(20.0));
+                        ui.label(egui::RichText::new(&self.status_message).size(14.0));
+                    });
+                    ui.add_space(20.0);
+                    return;
+                }
+                
+                // Show success or error message if there is one
+                if !self.status_message.is_empty() && self.status_message != "Ready" {
+                    if self.status_message.contains("successfully") {
+                        // Success message
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("✓").color(egui::Color32::GREEN));
+                                ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::GREEN));
+                            });
+                        });
+                        
+                        // Mark setup as completed
+                        self.setup_completed = true;
+                    } else if self.status_message != "Validating repository and saving configuration..." {
+                        // Error message (but not the temporary loading message)
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("⚠").color(egui::Color32::YELLOW));
+                                ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::YELLOW));
+                            });
+                        });
+                    }
+                    ui.add_space(10.0);
+                }
+                
+                // If setup is completed, close the modal
+                if self.setup_completed {
+                    return;
+                }
+                
+                ui.vertical(|ui| {
+                    ui.heading("Account Information");
+                    ui.add_space(10.0);
+                    
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("GitHub Username:").strong().size(14.0));
+                        ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_username).hint_text("e.g., john_doe"));
+                    });
+                    
+                    ui.add_space(10.0);
+                    
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Email:").strong().size(14.0));
+                        ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_email).hint_text("e.g., john@example.com"));
+                    });
+                    
+                    ui.add_space(15.0);
+                    
+                    ui.separator();
+                    ui.add_space(10.0);
+                    
+                    ui.heading("Repository Configuration");
+                    ui.add_space(10.0);
+                    
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Repository URL:").strong().size(14.0));
+                        ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.new_repo_url).hint_text("e.g., https://github.com/user/repo.git"));
+                    });
+                    
+                    ui.add_space(10.0);
+                    
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Auth Type:").strong().size(14.0));
+                        egui::ComboBox::from_id_source("setup_auth_type")
+                            .selected_text(format!("{:?}", self.new_repo_auth_type))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.new_repo_auth_type, AuthType::Default, "Default");
+                                ui.selectable_value(&mut self.new_repo_auth_type, AuthType::SSH, "SSH Key");
+                                ui.selectable_value(&mut self.new_repo_auth_type, AuthType::Token, "Personal Access Token");
+                            });
+                    });
+                    
+                    ui.add_space(10.0);
+                    
+                    match &self.new_repo_auth_type {
+                        AuthType::Token => {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Personal Access Token:").strong().size(14.0));
+                                ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_token).password(true).hint_text("ghp_..."));
+                            });
+                            ui.add_space(5.0);
+                            
+                            // Add OAuth button for GitHub token generation
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("").weak().size(12.0));
+                                let oauth_button = egui::Button::new(
+                                    egui::RichText::new("🔑 Generate Token via GitHub OAuth")
+                                        .size(12.0)
+                                )
+                                .fill(egui::Color32::from_rgb(60, 100, 160))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 180, 255)))
+                                .rounding(egui::Rounding::same(4.0));
+                                
+                                if ui.add(oauth_button).clicked() {
+                                    self.open_github_oauth();
+                                }
+                            });
+                            
+                            ui.label(egui::RichText::new("Click above to generate a personal access token via GitHub OAuth").weak().size(11.0));
+                        },
+                        AuthType::SSH => {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("SSH Key Path:").strong().size(14.0));
+                                ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_ssh_key_path).hint_text("~/.ssh/id_rsa"));
+                            });
+                            ui.label(egui::RichText::new("Ensure your SSH key is added to ssh-agent").weak().size(11.0));
+                        },
+                        _ => {
+                            ui.label(egui::RichText::new("Default authentication will use system Git configuration").weak().size(12.0));
+                        }
+                    }
+                    
+                    ui.add_space(20.0);
+                    
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let skip_button = egui::Button::new(
+                                egui::RichText::new("Skip Setup")
+                                    .size(14.0)
+                            )
+                            .fill(egui::Color32::from_rgb(120, 120, 120))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
+                            .rounding(egui::Rounding::same(6.0))
+                            .min_size(egui::Vec2::new(100.0, 30.0));
+                            
+                            if ui.add(skip_button).clicked() {
+                                self.show_first_time_setup = false;
+                                self.setup_completed = true;
+                                self.status_message = "Setup skipped. You can configure repositories later.".to_string();
+                            }
+                            
+                            let setup_button = egui::Button::new(
+                                egui::RichText::new("Complete Setup")
+                                    .size(14.0)
+                                    .color(egui::Color32::WHITE)
+                            )
+                            .fill(egui::Color32::from_rgb(70, 150, 70))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 220, 120)))
+                            .rounding(egui::Rounding::same(6.0))
+                            .min_size(egui::Vec2::new(120.0, 30.0));
+                            
+                            if ui.add(setup_button).clicked() {
+                                self.complete_first_time_setup();
+                            }
+                        });
+                    });
+                });
+            });
+        self.show_first_time_setup = open;
+    }
+    
+    // New function to handle first-time setup completion
+    fn complete_first_time_setup(&mut self) {
+        if self.new_repo_url.is_empty() {
+            self.status_message = "Please enter a repository URL".to_string();
+            return;
+        }
+        
+        // Validate repository URL
+        if !validate_repository_url(&self.new_repo_url) {
+            self.status_message = "Invalid repository URL format".to_string();
+            return;
+        }
+        
+        // Show loading indicator immediately
+        self.status_message = "Validating repository and saving configuration...".to_string();
+        self.is_operation_running = true;
+        
+        // Force UI update
+        // In a real implementation, this should be done asynchronously to avoid blocking the UI
+        // For now, we'll proceed with synchronous validation
+        
+        // Create repository info with authentication
+        let mut repo_info = RepositoryInfo::with_auth(
+            "origin".to_string(),
+            self.new_repo_url.clone(),
+            self.new_repo_auth_type.clone(),
+        );
+        
+        // Set authentication details based on type
+        match &self.new_repo_auth_type {
+            AuthType::Token => {
+                repo_info.auth_token = self.account_token.clone();
+            },
+            AuthType::SSH => {
+                repo_info.ssh_key_path = self.account_ssh_key_path.clone();
+            },
+            _ => {}
+        }
+        
+        // Validate the repository configuration before adding it
+        match verify_authentication(&repo_info) {
+            Ok(true) => {
+                // Repository authentication is valid
+                let mut config = self.config.lock().unwrap();
+                config.repositories.clear(); // Clear the default placeholder
+                config.add_repository(repo_info);
+                drop(config); // Release the lock
+                
+                // Close the setup modal
+                self.show_first_time_setup = false;
+                self.setup_completed = true;
+                self.is_operation_running = false;
+                self.status_message = "Setup completed successfully! Welcome to Multi-Repo Pusher.".to_string();
+            },
+            Ok(false) => {
+                // Repository authentication failed
+                self.is_operation_running = false;
+                self.status_message = "Repository authentication failed. Please check your credentials.".to_string();
+            },
+            Err(e) => {
+                // Error occurred during validation
+                self.is_operation_running = false;
+                self.status_message = format!("Error validating repository: {}", e);
+            }
+        }
+    }
+    
+    // New function to open GitHub OAuth flow
+    fn open_github_oauth(&mut self) {
+        // In a real implementation, this would open the GitHub OAuth URL
+        self.status_message = "Opening GitHub for OAuth authentication...".to_string();
+        self.is_operation_running = true;
+        
+        // Force UI update
+        // In a real implementation, you would use the webbrowser crate to open the OAuth URL
+        // For example: webbrowser::open("https://github.com/login/oauth/authorize?client_id=YOUR_CLIENT_ID&scope=repo")?;
+        
+        // For demonstration purposes, we'll show instructions to the user
+        // In a real application, you would need to:
+        // 1. Register your application with GitHub to get a client ID
+        // 2. Set up a redirect URL to receive the authorization code
+        // 3. Exchange the authorization code for an access token
+        // 4. Store the access token for use with Git operations
+        
+        // For now, we'll open the GitHub token generation page
+        match webbrowser::open("https://github.com/settings/tokens") {
+            Ok(_) => {
+                self.is_operation_running = false;
+                self.status_message = "GitHub page opened in your browser. Please generate a personal access token with 'repo' scope, then paste it above.".to_string();
+            },
+            Err(e) => {
+                self.is_operation_running = false;
+                self.status_message = format!("Failed to open browser: {}. Please manually go to https://github.com/settings/tokens", e);
+            }
+        }
     }
 }
