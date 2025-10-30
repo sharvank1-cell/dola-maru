@@ -1,0 +1,22 @@
+# Compiled files
+target/
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env

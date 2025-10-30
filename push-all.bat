@@ -1,0 +1,3 @@
+@echo off
+echo Pushing to all configured repositories...
+cargo run -- %*
