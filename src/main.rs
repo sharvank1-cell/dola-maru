@@ -58,7 +58,7 @@ fn run_gui(config: Arc<Mutex<RepoConfig>>) -> Result<()> {
     };
     
     eframe::run_native(
-        "Multi-Repo Pusher",
+        "संधि",
         native_options,
         Box::new(|cc| Box::new(gui::app::MultiRepoPusherApp::new(cc, config))),
     )

@@ -9,3 +9,6 @@ mod git_operations_tests;
 
 #[cfg(test)]
 mod advanced_git_tests;
+
+#[cfg(test)]
+mod account_management_tests;

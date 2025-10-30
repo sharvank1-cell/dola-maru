@@ -13,3 +13,4 @@ clap = { version = "4.0", features = ["derive"] }
 egui = "0.27"
 eframe = "0.27"
 rfd = "0.14"
+webbrowser = "0.8"
