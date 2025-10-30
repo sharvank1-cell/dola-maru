@@ -7,7 +7,10 @@ mod tests {
         check_merge_conflicts,
         push_to_remote,
         pull_from_remote,
-        fetch_from_remote
+        fetch_from_remote,
+        push_to_all_repositories,
+        pull_from_all_repositories,
+        fetch_from_all_repositories
     };
 
     #[test]
@@ -140,5 +143,24 @@ mod tests {
         let _pull_fn = pull_from_remote as fn(&git2::Repository, &RepositoryInfo, &str) -> Result<(), anyhow::Error>;
         let _fetch_fn = fetch_from_remote as fn(&git2::Repository, &RepositoryInfo, &str) -> Result<(), anyhow::Error>;
         let _tag_fn = create_and_push_tag as fn(&git2::Repository, &RepositoryInfo, &str, &str) -> Result<(), anyhow::Error>;
+    }
+
+    #[test]
+    fn test_bulk_operations_function_signatures() {
+        // Test that all bulk operation functions exist with correct signatures
+        let _config = RepoConfig::new();
+        
+        // Verify function signatures
+        let _push_all_fn = push_to_all_repositories as fn(&RepoConfig, &str, &str) -> Vec<(String, String)>;
+        let _pull_all_fn = pull_from_all_repositories as fn(&RepoConfig, &str) -> Vec<(String, String)>;
+        let _fetch_all_fn = fetch_from_all_repositories as fn(&RepoConfig, &str) -> Vec<(String, String)>;
+    }
+
+    #[test]
+    fn test_auth_type_variants() {
+        // Test that all authentication types are properly defined
+        assert_eq!(format!("{:?}", AuthType::Default), "Default");
+        assert_eq!(format!("{:?}", AuthType::SSH), "SSH");
+        assert_eq!(format!("{:?}", AuthType::Token), "Token");
     }
 }

@@ -3,7 +3,14 @@ mod tests {
     use crate::core::repository::{RepositoryInfo, AuthType, RepoConfig};
     use crate::core::git_operations::{
         validate_repository_url, 
-        check_merge_conflicts
+        check_merge_conflicts,
+        push_to_all_repositories,
+        pull_from_all_repositories,
+        fetch_from_all_repositories,
+        create_and_push_tag,
+        push_to_remote,
+        pull_from_remote,
+        fetch_from_remote
     };
 
     #[test]
@@ -73,5 +80,25 @@ mod tests {
         
         config.remove_repository(0);
         assert_eq!(config.repositories.len(), 0);
+    }
+
+    #[test]
+    fn test_git_operations_function_signatures() {
+        // Test that all git operation functions exist with correct signatures
+        let _repo_info = RepositoryInfo::new(
+            "test".to_string(),
+            "https://github.com/user/repo.git".to_string()
+        );
+        
+        // Verify function signatures (this will fail at runtime but compile-time checks pass)
+        let _push_fn = push_to_remote as fn(&git2::Repository, &RepositoryInfo, &str) -> Result<(), anyhow::Error>;
+        let _pull_fn = pull_from_remote as fn(&git2::Repository, &RepositoryInfo, &str) -> Result<(), anyhow::Error>;
+        let _fetch_fn = fetch_from_remote as fn(&git2::Repository, &RepositoryInfo, &str) -> Result<(), anyhow::Error>;
+        let _tag_fn = create_and_push_tag as fn(&git2::Repository, &RepositoryInfo, &str, &str) -> Result<(), anyhow::Error>;
+        
+        let _config = RepoConfig::new();
+        let _push_all_fn = push_to_all_repositories as fn(&RepoConfig, &str, &str) -> Vec<(String, String)>;
+        let _pull_all_fn = pull_from_all_repositories as fn(&RepoConfig, &str) -> Vec<(String, String)>;
+        let _fetch_all_fn = fetch_from_all_repositories as fn(&RepoConfig, &str) -> Vec<(String, String)>;
     }
 }

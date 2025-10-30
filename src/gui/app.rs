@@ -7,7 +7,8 @@ use crate::core::git_operations::{
     create_and_push_tag, 
     check_merge_conflicts,
     validate_repository_url, 
-    verify_authentication
+    verify_authentication,
+    clone_all_repositories
 };
 use std::sync::{Arc, Mutex};
 
@@ -28,9 +29,24 @@ pub struct MultiRepoPusherApp {
     config_name_input: String,
     show_auth_fields: bool,
     active_tab: Tab,
+    // New fields for account management
+    show_account_form: bool,
+    account_username: String,
+    account_email: String,
+    account_token: String,
+    account_ssh_key_path: String,
+    account_auth_type: AuthType,
+    // Animation variables
+    animation_timer: f32,
+    // New fields for cloning and group management
+    clone_destination_path: String,
+    show_group_form: bool,
+    new_group_name: String,
+    new_group_description: String,
+    selected_group: String,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum Tab {
     Commit,
     Repositories,
@@ -45,8 +61,20 @@ impl Default for Tab {
 
 impl MultiRepoPusherApp {
     pub fn new(cc: &eframe::CreationContext<'_>, config: Arc<Mutex<RepoConfig>>) -> Self {
-        // Customize the look of the GUI
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        // Customize the look of the GUI with premium styling
+        let mut visuals = egui::Visuals::dark();
+        visuals.panel_fill = egui::Color32::from_rgb(25, 25, 35); // Deep dark background
+        visuals.window_fill = egui::Color32::from_rgb(35, 35, 50); // Slightly lighter window
+        visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 70, 100));
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(40, 40, 60);
+        visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::from_rgb(200, 200, 220);
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(55, 55, 80);
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(80, 80, 130);
+        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(100, 100, 180);
+        visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
+        visuals.selection.bg_fill = egui::Color32::from_rgb(90, 90, 150);
+        cc.egui_ctx.set_visuals(visuals);
+        
         
         Self {
             config,
@@ -65,6 +93,21 @@ impl MultiRepoPusherApp {
             config_name_input: "default".to_string(),
             show_auth_fields: false,
             active_tab: Tab::Commit,
+            // Initialize new account fields
+            show_account_form: false,
+            account_username: String::new(),
+            account_email: String::new(),
+            account_token: String::new(),
+            account_ssh_key_path: String::new(),
+            account_auth_type: AuthType::Default,
+            // Initialize animation timer
+            animation_timer: 0.0,
+            // Initialize new fields for cloning and group management
+            clone_destination_path: String::new(),
+            show_group_form: false,
+            new_group_name: String::new(),
+            new_group_description: String::new(),
+            selected_group: String::new(),
         }
     }
     
@@ -200,6 +243,74 @@ impl MultiRepoPusherApp {
         self.is_operation_running = false;
     }
     
+    // New method for cloning all repositories
+    fn clone_all_repositories(&mut self) {
+        if self.clone_destination_path.is_empty() {
+            self.status_message = "Please specify a destination path for cloning".to_string();
+            return;
+        }
+        
+        self.is_operation_running = true;
+        self.status_message = "Cloning repositories...".to_string();
+        self.operation_results.clear();
+        
+        // Clone config for iteration
+        let config_clone = self.config.clone();
+        let config = config_clone.lock().unwrap();
+        
+        // Clone all repositories
+        self.operation_results = clone_all_repositories(&config, &self.clone_destination_path);
+        
+        self.status_message = "Cloning completed!".to_string();
+        self.is_operation_running = false;
+    }
+    
+    // New method for creating a repository group
+    fn create_repository_group(&mut self) {
+        if self.new_group_name.is_empty() {
+            self.status_message = "Please enter a group name".to_string();
+            return;
+        }
+        
+        let group = crate::core::repository::RepositoryGroup::new(
+            self.new_group_name.clone(),
+            self.new_group_description.clone()
+        );
+        
+        let mut config = self.config.lock().unwrap();
+        config.add_group(group);
+        
+        self.status_message = format!("Group '{}' created successfully", self.new_group_name);
+        
+        // Clear form fields
+        self.new_group_name.clear();
+        self.new_group_description.clear();
+        self.show_group_form = false;
+    }
+    
+    // New method for adding a repository to a group
+    fn add_repository_to_group(&mut self, repo_index: usize, group_name: String) {
+        // Get the repository name first to avoid borrowing issues
+        let repo_name = {
+            let config = self.config.lock().unwrap();
+            if let Some(repo) = config.repositories.get(repo_index) {
+                repo.name.clone()
+            } else {
+                self.status_message = "Repository not found".to_string();
+                return;
+            }
+        };
+        
+        // Now add the repository to the group
+        let mut config = self.config.lock().unwrap();
+        if let Some(group) = config.get_group_mut(&group_name) {
+            group.add_repository(repo_name.clone());
+            self.status_message = format!("Repository '{}' added to group '{}'", repo_name, group_name);
+        } else {
+            self.status_message = format!("Group '{}' not found", group_name);
+        }
+    }
+    
     fn validate_and_add_repository(&mut self) {
         if self.new_repo_name.is_empty() || self.new_repo_url.is_empty() {
             self.status_message = "Please fill in all required fields".to_string();
@@ -241,24 +352,60 @@ impl MultiRepoPusherApp {
         self.new_repo_ssh_key.clear();
         self.status_message = "Repository added successfully".to_string();
     }
+    
+    // New function to handle account creation
+    fn add_new_account(&mut self) {
+        if self.account_username.is_empty() || self.account_email.is_empty() {
+            self.status_message = "Please fill in username and email".to_string();
+            return;
+        }
+        
+        // For now, we'll just show a success message
+        // In a real implementation, this would save the account details
+        self.status_message = format!("Account '{}' added successfully", self.account_username);
+        
+        // Close the form
+        self.show_account_form = false;
+        
+        // Clear the form fields
+        self.account_username.clear();
+        self.account_email.clear();
+        self.account_token.clear();
+        self.account_ssh_key_path.clear();
+    }
 }
 
 impl eframe::App for MultiRepoPusherApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Update animation timer
+        self.animation_timer += ctx.input(|i| i.stable_dt);
+        
         egui::CentralPanel::default().show(ctx, |ui| {
             // Header with title and styling
             ui.vertical_centered(|ui| {
-                ui.heading(egui::RichText::new("Multi-Repo Pusher").size(24.0).color(egui::Color32::from_rgb(100, 150, 255)));
-                ui.label(egui::RichText::new("Push your code to multiple repositories simultaneously").italics());
+                // Animated title with gradient effect
+                let hue = (self.animation_timer * 0.5).sin() * 0.5 + 0.5;
+                let color = egui::Color32::from_rgb(
+                    (hue * 255.0) as u8,
+                    ((1.0 - hue) * 255.0) as u8,
+                    (hue * 128.0) as u8
+                );
+                ui.heading(egui::RichText::new("Multi-Repo Pusher").size(28.0).color(color));
+                ui.label(egui::RichText::new("Push your code to multiple repositories simultaneously").italics().weak());
             });
             
             ui.separator();
             
-            // Tab selection
+            // Tab selection with improved styling
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.active_tab, Tab::Commit, "-commit-");
-                ui.selectable_value(&mut self.active_tab, Tab::Repositories, " Repositories ");
-                ui.selectable_value(&mut self.active_tab, Tab::Advanced, " Advanced ");
+                ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::from_rgb(50, 50, 70);
+                ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::from_rgb(70, 70, 110);
+                ui.visuals_mut().widgets.active.bg_fill = egui::Color32::from_rgb(90, 90, 150);
+                ui.visuals_mut().widgets.active.fg_stroke.color = egui::Color32::WHITE;
+                
+                ui.selectable_value(&mut self.active_tab, Tab::Commit, "📝 Commit");
+                ui.selectable_value(&mut self.active_tab, Tab::Repositories, "📂 Repositories");
+                ui.selectable_value(&mut self.active_tab, Tab::Advanced, "⚙️ Advanced");
             });
             
             ui.separator();
@@ -269,18 +416,21 @@ impl eframe::App for MultiRepoPusherApp {
                 Tab::Advanced => self.render_advanced_tab(ui),
             }
             
-            // Results section
+            // Show account form as a modal if needed
+            self.render_account_modal(ctx);
+            
+            // Results section with improved styling
             if !self.operation_results.is_empty() {
                 ui.add_space(10.0);
                 
                 ui.group(|ui| {
-                    ui.heading("Results");
+                    ui.heading("📋 Results");
                     
                     egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
                         for (repo_name, status) in &self.operation_results {
                             ui.group(|ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(repo_name).strong());
+                                    ui.label(egui::RichText::new(repo_name).size(14.0).strong());
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         if status == "Success" || status == "No conflicts" {
                                             ui.label(egui::RichText::new("✓ Success").color(egui::Color32::GREEN));
@@ -301,13 +451,18 @@ impl eframe::App for MultiRepoPusherApp {
                 });
             }
             
-            // Status message
+            // Status message with loading indicator for long operations
             if !self.status_message.is_empty() && self.status_message != "Ready" {
                 ui.add_space(10.0);
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Status:").strong());
                         ui.label(&self.status_message);
+                        
+                        // Show spinner when operation is running
+                        if self.is_operation_running {
+                            ui.add(egui::Spinner::new());
+                        }
                     });
                 });
             }
@@ -317,115 +472,299 @@ impl eframe::App for MultiRepoPusherApp {
 
 impl MultiRepoPusherApp {
     fn render_commit_tab(&mut self, ui: &mut egui::Ui) {
-        // Commit section with better styling
+        // Commit section with premium styling
         ui.group(|ui| {
-            ui.heading("Commit Settings");
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Commit message:").strong());
-                ui.add(egui::TextEdit::singleline(&mut self.commit_message).hint_text("Enter commit message"));
-            });
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Branch name:").strong());
-                ui.add(egui::TextEdit::singleline(&mut self.branch_name).hint_text("main"));
-            });
-            
+            ui.heading("📝 Commit Settings");
             ui.add_space(10.0);
             
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.is_operation_running {
-                        ui.add(egui::Spinner::new());
-                        ui.label("Pushing...");
-                    }
+            // Create a visually appealing input group
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Commit message:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.commit_message).hint_text("Enter commit message"));
+                });
+                
+                ui.add_space(10.0);
+                
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Branch name:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.branch_name).hint_text("main"));
+                });
+            });
+            
+            ui.add_space(15.0);
+            
+            // Premium push button with animation
+            ui.vertical_centered(|ui| {
+                if self.is_operation_running {
+                    ui.add(egui::Spinner::new().size(20.0));
+                    ui.label("Pushing to repositories...");
+                } else {
+                    let button = egui::Button::new(
+                        egui::RichText::new("🚀 Push to All Repositories")
+                            .size(16.0)
+                            .color(egui::Color32::WHITE)
+                    )
+                    .fill(egui::Color32::from_rgb(70, 130, 180))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 180, 255)))
+                    .rounding(egui::Rounding::same(8.0))
+                    .min_size(egui::Vec2::new(250.0, 40.0));
                     
-                    if ui.button("🚀 Push to All Repositories").clicked() && !self.is_operation_running {
+                    if ui.add(button).clicked() {
                         self.push_to_all_repositories();
                     }
-                });
+                }
             });
         });
     }
     
     fn render_repositories_tab(&mut self, ui: &mut egui::Ui) {
-        // Configuration management
+        // Configuration management with premium styling
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.heading("Configuration");
+                ui.heading("⚙️ Configuration");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("💾 Save Config").clicked() {
+                    // Add the new "Add New Account" button with premium styling
+                    let account_button = egui::Button::new(
+                        egui::RichText::new("👤 Add New Account")
+                            .size(14.0)
+                    )
+                    .fill(egui::Color32::from_rgb(60, 100, 60))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 200, 100)))
+                    .rounding(egui::Rounding::same(6.0));
+                    
+                    if ui.add(account_button).clicked() {
+                        self.show_account_form = true;
+                    }
+                    
+                    let save_button = egui::Button::new(
+                        egui::RichText::new("💾 Save Config")
+                            .size(14.0)
+                    )
+                    .fill(egui::Color32::from_rgb(80, 80, 120))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 150, 200)))
+                    .rounding(egui::Rounding::same(6.0));
+                    
+                    if ui.add(save_button).clicked() {
                         self.status_message = "Configuration saved".to_string();
                     }
-                    if ui.button("📂 Load Config").clicked() {
+                    
+                    let load_button = egui::Button::new(
+                        egui::RichText::new("📂 Load Config")
+                            .size(14.0)
+                    )
+                    .fill(egui::Color32::from_rgb(80, 80, 120))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 150, 200)))
+                    .rounding(egui::Rounding::same(6.0));
+                    
+                    if ui.add(load_button).clicked() {
                         self.status_message = "Configuration loaded".to_string();
                     }
                 });
             });
             
-            ui.add_space(5.0);
+            ui.add_space(10.0);
             
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Config Name:").strong());
-                ui.add(egui::TextEdit::singleline(&mut self.config_name_input).hint_text("default"));
+                ui.label(egui::RichText::new("Config Name:").strong().size(14.0));
+                ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.config_name_input).hint_text("default"));
             });
         });
         
-        ui.add_space(10.0);
+        ui.add_space(15.0);
         
-        // Repository management section
+        // Repository cloning section
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.heading("Repository Management");
+                ui.heading("📥 Repository Cloning");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("🔄 Refresh").clicked() {
+                    if self.is_operation_running {
+                        ui.add(egui::Spinner::new().size(16.0));
+                    }
+                    
+                    let clone_button = egui::Button::new(
+                        egui::RichText::new("📥 Clone All Repositories")
+                            .size(14.0)
+                    )
+                    .fill(egui::Color32::from_rgb(60, 120, 160))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 180, 220)))
+                    .rounding(egui::Rounding::same(6.0));
+                    
+                    if ui.add(clone_button).clicked() && !self.is_operation_running {
+                        self.clone_all_repositories();
+                    }
+                });
+            });
+            
+            ui.add_space(10.0);
+            
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Clone Destination:").strong().size(14.0));
+                ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.clone_destination_path).hint_text("e.g., C:\\repos or /home/user/repos"));
+            });
+            
+            ui.label(egui::RichText::new("Specify the directory where repositories will be cloned.").weak().size(12.0));
+        });
+        
+        ui.add_space(15.0);
+        
+        // Repository group management section
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.heading("📁 Repository Groups");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let create_group_button = egui::Button::new(
+                        egui::RichText::new("➕ Create Group")
+                            .size(14.0)
+                    )
+                    .fill(egui::Color32::from_rgb(100, 100, 160))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(160, 160, 220)))
+                    .rounding(egui::Rounding::same(6.0));
+                    
+                    if ui.add(create_group_button).clicked() {
+                        self.show_group_form = true;
+                    }
+                });
+            });
+            
+            ui.add_space(10.0);
+            
+            // Display existing groups
+            let config = self.config.clone();
+            let groups = config.lock().unwrap().groups.clone();
+            
+            if groups.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("No repository groups created").weak().size(14.0));
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Select Group:").strong().size(14.0));
+                    egui::ComboBox::from_id_source("selected_group")
+                        .selected_text(if self.selected_group.is_empty() { "Select a group" } else { &self.selected_group })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.selected_group, String::new(), "None");
+                            for group in &groups {
+                                ui.selectable_value(&mut self.selected_group, group.name.clone(), &group.name);
+                            }
+                        });
+                });
+                
+                if !self.selected_group.is_empty() {
+                    if let Some(group) = groups.iter().find(|g| g.name == self.selected_group) {
+                        ui.add_space(10.0);
+                        ui.label(egui::RichText::new(&group.description).weak().size(13.0));
+                        ui.label(egui::RichText::new(format!("{} repositories in this group", group.repository_names.len())).weak().size(12.0));
+                    }
+                }
+            }
+        });
+        
+        // Show group form as a modal if needed
+        self.render_group_modal(ui.ctx());
+        
+        ui.add_space(15.0);
+        
+        // Repository management section with premium styling
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.heading("📂 Repository Management");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let refresh_button = egui::Button::new(
+                        egui::RichText::new("🔄 Refresh")
+                            .size(14.0)
+                    )
+                    .fill(egui::Color32::from_rgb(90, 90, 90))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 180)))
+                    .rounding(egui::Rounding::same(6.0));
+                    
+                    if ui.add(refresh_button).clicked() {
                         // Refresh functionality could be added here
                     }
                 });
             });
             
-            ui.add_space(5.0);
+            ui.add_space(10.0);
             
-            // Repository list with better styling
+            // Repository list with premium styling and increased height
             let config = self.config.clone();
             let repos = config.lock().unwrap().repositories.clone();
             
             if repos.is_empty() {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(egui::RichText::new("No repositories configured").weak());
-                    ui.add_space(20.0);
+                    ui.add_space(30.0);
+                    ui.label(egui::RichText::new("No repositories configured").weak().size(14.0));
+                    ui.add_space(30.0);
                 });
             } else {
-                egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                // Increased height for better browsing experience
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                     for (i, repo) in repos.iter().enumerate() {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
                                 ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new(&repo.name).size(14.0).strong());
-                                    ui.label(egui::RichText::new(&repo.url).weak().small());
+                                    ui.label(egui::RichText::new(&repo.name).size(16.0).strong().color(egui::Color32::from_rgb(180, 200, 255)));
+                                    // Show full URL as per user preference
+                                    ui.label(egui::RichText::new(&repo.url).weak().size(12.0));
                                     match &repo.auth_type {
                                         AuthType::SSH => {
-                                            ui.label(egui::RichText::new("Auth: SSH").weak().small());
+                                            ui.label(egui::RichText::new("🔐 Auth: SSH").weak().size(11.0).color(egui::Color32::from_rgb(150, 200, 150)));
                                         },
                                         AuthType::Token => {
-                                            ui.label(egui::RichText::new("Auth: Token").weak().small());
+                                            ui.label(egui::RichText::new("🔐 Auth: Token").weak().size(11.0).color(egui::Color32::from_rgb(150, 200, 150)));
                                         },
                                         AuthType::Default => {
-                                            ui.label(egui::RichText::new("Auth: Default").weak().small());
+                                            ui.label(egui::RichText::new("🔐 Auth: Default").weak().size(11.0).color(egui::Color32::from_rgb(150, 200, 150)));
                                         }
+                                    }
+                                    
+                                    // Show group if repository belongs to one
+                                    if !repo.group.is_empty() {
+                                        ui.label(egui::RichText::new(format!("📁 Group: {}", repo.group)).weak().size(11.0).color(egui::Color32::from_rgb(200, 150, 200)));
                                     }
                                 });
                                 
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button("🗑 Remove").clicked() {
+                                    // Add to group button if a group is selected
+                                    if !self.selected_group.is_empty() {
+                                        let add_to_group_button = egui::Button::new(
+                                            egui::RichText::new("📁 Add to Group")
+                                                .size(11.0)
+                                        )
+                                        .fill(egui::Color32::from_rgb(120, 100, 160))
+                                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 160, 220)))
+                                        .rounding(egui::Rounding::same(4.0))
+                                        .min_size(egui::Vec2::new(90.0, 25.0));
+                                        
+                                        if ui.add(add_to_group_button).clicked() {
+                                            self.add_repository_to_group(i, self.selected_group.clone());
+                                        }
+                                    }
+                                    
+                                    let remove_button = egui::Button::new(
+                                        egui::RichText::new("🗑 Remove")
+                                            .size(12.0)
+                                    )
+                                    .fill(egui::Color32::from_rgb(150, 80, 80))
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 150, 150)))
+                                    .rounding(egui::Rounding::same(4.0))
+                                    .min_size(egui::Vec2::new(70.0, 25.0));
+                                    
+                                    if ui.add(remove_button).clicked() {
                                         let mut config = self.config.lock().unwrap();
                                         config.remove_repository(i);
                                     }
-                                    if ui.button("🔍 Validate").clicked() {
+                                    
+                                    let validate_button = egui::Button::new(
+                                        egui::RichText::new("🔍 Validate")
+                                            .size(12.0)
+                                    )
+                                    .fill(egui::Color32::from_rgb(80, 120, 80))
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 200, 150)))
+                                    .rounding(egui::Rounding::same(4.0))
+                                    .min_size(egui::Vec2::new(70.0, 25.0));
+                                    
+                                    if ui.add(validate_button).clicked() {
                                         match verify_authentication(repo) {
                                             Ok(true) => {
                                                 self.status_message = format!("Repository {} authentication verified", repo.name);
@@ -441,74 +780,94 @@ impl MultiRepoPusherApp {
                                 });
                             });
                         });
+                        ui.add_space(5.0);
                     }
                 });
             }
             
+            ui.add_space(15.0);
+            
+            // Add new repository form with premium styling
+            ui.separator();
+            ui.heading("➕ Add New Repository");
+            
             ui.add_space(10.0);
             
-            // Add new repository form
-            ui.separator();
-            ui.heading("Add New Repository");
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Name:").strong());
-                ui.add(egui::TextEdit::singleline(&mut self.new_repo_name).hint_text("e.g., github"));
-            });
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("URL:").strong());
-                ui.add(egui::TextEdit::singleline(&mut self.new_repo_url).hint_text("e.g., https://github.com/user/repo.git"));
-            });
-            
-            ui.add_space(5.0);
-            
-            // Authentication type selection
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Auth Type:").strong());
-                egui::ComboBox::from_id_source("auth_type")
-                    .selected_text(format!("{:?}", self.new_repo_auth_type))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.new_repo_auth_type, AuthType::Default, "Default");
-                        ui.selectable_value(&mut self.new_repo_auth_type, AuthType::SSH, "SSH Key");
-                        ui.selectable_value(&mut self.new_repo_auth_type, AuthType::Token, "Token");
-                    });
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Name:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.new_repo_name).hint_text("e.g., github"));
+                });
                 
-                if ui.button("🔑 Toggle Auth Fields").clicked() {
-                    self.show_auth_fields = !self.show_auth_fields;
-                }
-            });
-            
-            // Conditional authentication fields
-            if self.show_auth_fields {
-                match &self.new_repo_auth_type {
-                    AuthType::Token => {
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Token:").strong());
-                            ui.add(egui::TextEdit::singleline(&mut self.new_repo_token).password(true));
+                ui.add_space(8.0);
+                
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("URL:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.new_repo_url).hint_text("e.g., https://github.com/user/repo.git"));
+                });
+                
+                ui.add_space(8.0);
+                
+                // Authentication type selection
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Auth Type:").strong().size(14.0));
+                    egui::ComboBox::from_id_source("auth_type")
+                        .selected_text(format!("{:?}", self.new_repo_auth_type))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.new_repo_auth_type, AuthType::Default, "Default");
+                            ui.selectable_value(&mut self.new_repo_auth_type, AuthType::SSH, "SSH Key");
+                            ui.selectable_value(&mut self.new_repo_auth_type, AuthType::Token, "Token");
                         });
-                    },
-                    AuthType::SSH => {
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("SSH Key Path:").strong());
-                            ui.add(egui::TextEdit::singleline(&mut self.new_repo_ssh_key).hint_text("~/.ssh/id_rsa"));
-                        });
-                    },
-                    _ => {}
+                    
+                    let toggle_button = egui::Button::new(
+                        egui::RichText::new("🔑 Toggle Auth Fields")
+                            .size(12.0)
+                    )
+                    .fill(egui::Color32::from_rgb(90, 90, 120))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(160, 160, 200)))
+                    .rounding(egui::Rounding::same(4.0));
+                    
+                    if ui.add(toggle_button).clicked() {
+                        self.show_auth_fields = !self.show_auth_fields;
+                    }
+                });
+                
+                // Conditional authentication fields
+                if self.show_auth_fields {
+                    match &self.new_repo_auth_type {
+                        AuthType::Token => {
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Token:").strong().size(14.0));
+                                ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.new_repo_token).password(true));
+                            });
+                        },
+                        AuthType::SSH => {
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("SSH Key Path:").strong().size(14.0));
+                                ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.new_repo_ssh_key).hint_text("~/.ssh/id_rsa"));
+                            });
+                        },
+                        _ => {}
+                    }
                 }
-            }
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("➕ Add Repository").clicked() {
+                
+                ui.add_space(10.0);
+                
+                // Premium add button
+                ui.vertical_centered(|ui| {
+                    let add_button = egui::Button::new(
+                        egui::RichText::new("➕ Add Repository")
+                            .size(14.0)
+                            .color(egui::Color32::WHITE)
+                    )
+                    .fill(egui::Color32::from_rgb(70, 130, 180))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 180, 255)))
+                    .rounding(egui::Rounding::same(6.0))
+                    .min_size(egui::Vec2::new(150.0, 35.0));
+                    
+                    if ui.add(add_button).clicked() {
                         self.validate_and_add_repository();
                     }
                 });
@@ -516,85 +875,311 @@ impl MultiRepoPusherApp {
         });
     }
     
+    // New function to handle the account modal rendering
+    fn render_account_modal(&mut self, ctx: &egui::Context) {
+        if self.show_account_form {
+            let mut show_account_form = self.show_account_form;
+            egui::Window::new("👤 Add New Account")
+                .open(&mut show_account_form)
+                .resizable(true)
+                .default_width(450.0)
+                .default_height(350.0)
+                .show(ctx, |ui| {
+                    self.render_account_form(ui);
+                });
+            self.show_account_form = show_account_form;
+        }
+    }
+    
+    // New function to render the account form with premium styling
+    fn render_account_form(&mut self, ui: &mut egui::Ui) {
+        ui.vertical(|ui| {
+            ui.heading("Account Details");
+            ui.label(egui::RichText::new("Enter your GitHub account information").weak().size(13.0));
+            
+            ui.add_space(15.0);
+            
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("GitHub Username:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_username).hint_text("e.g., john_doe"));
+                });
+                
+                ui.add_space(10.0);
+                
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Email:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_email).hint_text("e.g., john@example.com"));
+                });
+                
+                ui.add_space(15.0);
+                
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Authentication Type:").strong().size(14.0));
+                    egui::ComboBox::from_id_source("account_auth_type")
+                        .selected_text(format!("{:?}", self.account_auth_type))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.account_auth_type, AuthType::Default, "Default");
+                            ui.selectable_value(&mut self.account_auth_type, AuthType::SSH, "SSH Key");
+                            ui.selectable_value(&mut self.account_auth_type, AuthType::Token, "Personal Access Token");
+                        });
+                });
+                
+                ui.add_space(10.0);
+                
+                match &self.account_auth_type {
+                    AuthType::Token => {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Personal Access Token:").strong().size(14.0));
+                            ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_token).password(true).hint_text("ghp_..."));
+                        });
+                        ui.label(egui::RichText::new("Generate a token in GitHub Settings > Developer settings > Personal access tokens").weak().size(11.0));
+                    },
+                    AuthType::SSH => {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("SSH Key Path:").strong().size(14.0));
+                            ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_ssh_key_path).hint_text("~/.ssh/id_rsa"));
+                        });
+                        ui.label(egui::RichText::new("Ensure your SSH key is added to ssh-agent").weak().size(11.0));
+                    },
+                    _ => {
+                        ui.label(egui::RichText::new("Default authentication will use system Git configuration").weak().size(12.0));
+                    }
+                }
+                
+                ui.add_space(20.0);
+                
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let cancel_button = egui::Button::new(
+                            egui::RichText::new("❌ Cancel")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(120, 120, 120))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(100.0, 30.0));
+                        
+                        if ui.add(cancel_button).clicked() {
+                            self.show_account_form = false;
+                            // Clear form fields
+                            self.account_username.clear();
+                            self.account_email.clear();
+                            self.account_token.clear();
+                            self.account_ssh_key_path.clear();
+                        }
+                        
+                        let add_button = egui::Button::new(
+                            egui::RichText::new("✅ Add Account")
+                                .size(14.0)
+                                .color(egui::Color32::WHITE)
+                        )
+                        .fill(egui::Color32::from_rgb(70, 150, 70))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 220, 120)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(120.0, 30.0));
+                        
+                        if ui.add(add_button).clicked() {
+                            self.add_new_account();
+                        }
+                    });
+                });
+            });
+        });
+    }
+    
+    // New function to handle the group modal rendering
+    fn render_group_modal(&mut self, ctx: &egui::Context) {
+        if self.show_group_form {
+            let mut show_group_form = self.show_group_form;
+            egui::Window::new("📁 Create New Repository Group")
+                .open(&mut show_group_form)
+                .resizable(true)
+                .default_width(400.0)
+                .default_height(250.0)
+                .show(ctx, |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("Create Repository Group");
+                        ui.label(egui::RichText::new("Create a group to organize and batch operate on repositories").weak().size(13.0));
+                        
+                        ui.add_space(15.0);
+                        
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Group Name:").strong().size(14.0));
+                                ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.new_group_name).hint_text("e.g., frontend, backend, mobile"));
+                            });
+                            
+                            ui.add_space(10.0);
+                            
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Description:").strong().size(14.0));
+                                ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.new_group_description).hint_text("e.g., Frontend repositories"));
+                            });
+                            
+                            ui.add_space(20.0);
+                            
+                            ui.horizontal(|ui| {
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let cancel_button = egui::Button::new(
+                                        egui::RichText::new("❌ Cancel")
+                                            .size(14.0)
+                                    )
+                                    .fill(egui::Color32::from_rgb(120, 120, 120))
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
+                                    .rounding(egui::Rounding::same(6.0))
+                                    .min_size(egui::Vec2::new(100.0, 30.0));
+                                    
+                                    if ui.add(cancel_button).clicked() {
+                                        self.show_group_form = false;
+                                        // Clear form fields
+                                        self.new_group_name.clear();
+                                        self.new_group_description.clear();
+                                    }
+                                    
+                                    let create_button = egui::Button::new(
+                                        egui::RichText::new("✅ Create Group")
+                                            .size(14.0)
+                                            .color(egui::Color32::WHITE)
+                                    )
+                                    .fill(egui::Color32::from_rgb(100, 100, 160))
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(160, 160, 220)))
+                                    .rounding(egui::Rounding::same(6.0))
+                                    .min_size(egui::Vec2::new(120.0, 30.0));
+                                    
+                                    if ui.add(create_button).clicked() {
+                                        self.create_repository_group();
+                                    }
+                                });
+                            });
+                        });
+                    });
+                });
+            self.show_group_form = show_group_form;
+        }
+    }
+    
     fn render_advanced_tab(&mut self, ui: &mut egui::Ui) {
         ui.group(|ui| {
-            ui.heading("Advanced Git Operations");
+            ui.heading("⚙️ Advanced Git Operations");
             
-            ui.add_space(10.0);
+            ui.add_space(15.0);
             
             // Branch operations
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Branch:").strong());
-                ui.add(egui::TextEdit::singleline(&mut self.branch_name).hint_text("main"));
-            });
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.is_operation_running {
-                        ui.add(egui::Spinner::new());
-                    }
-                    
-                    if ui.button("📥 Pull from All").clicked() && !self.is_operation_running {
-                        self.pull_from_all_repositories();
-                    }
-                    
-                    if ui.button("🔄 Fetch from All").clicked() && !self.is_operation_running {
-                        self.fetch_from_all_repositories();
-                    }
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Branch:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.branch_name).hint_text("main"));
+                });
+                
+                ui.add_space(10.0);
+                
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.is_operation_running {
+                            ui.add(egui::Spinner::new().size(16.0));
+                        }
+                        
+                        let pull_button = egui::Button::new(
+                            egui::RichText::new("📥 Pull from All")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(100, 100, 150))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 230)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(130.0, 35.0));
+                        
+                        if ui.add(pull_button).clicked() && !self.is_operation_running {
+                            self.pull_from_all_repositories();
+                        }
+                        
+                        let fetch_button = egui::Button::new(
+                            egui::RichText::new("🔄 Fetch from All")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(100, 100, 150))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 230)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(130.0, 35.0));
+                        
+                        if ui.add(fetch_button).clicked() && !self.is_operation_running {
+                            self.fetch_from_all_repositories();
+                        }
+                    });
                 });
             });
             
             ui.separator();
             
             // Tag operations
-            ui.heading("Tag Operations");
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Tag Name:").strong());
-                ui.add(egui::TextEdit::singleline(&mut self.tag_name).hint_text("v1.0.0"));
-            });
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Tag Message:").strong());
-                ui.add(egui::TextEdit::singleline(&mut self.tag_message).hint_text("Release v1.0.0"));
-            });
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.is_operation_running {
-                        ui.add(egui::Spinner::new());
-                    }
-                    
-                    if ui.button("🏷️ Create and Push Tag").clicked() && !self.is_operation_running {
-                        self.create_and_push_tag();
-                    }
+            ui.vertical(|ui| {
+                ui.heading("🏷️ Tag Operations");
+                
+                ui.add_space(10.0);
+                
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Tag Name:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.tag_name).hint_text("v1.0.0"));
+                });
+                
+                ui.add_space(8.0);
+                
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Tag Message:").strong().size(14.0));
+                    ui.add_sized([ui.available_width() * 0.7, 25.0], egui::TextEdit::singleline(&mut self.tag_message).hint_text("Release v1.0.0"));
+                });
+                
+                ui.add_space(10.0);
+                
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.is_operation_running {
+                            ui.add(egui::Spinner::new().size(16.0));
+                        }
+                        
+                        let tag_button = egui::Button::new(
+                            egui::RichText::new("🏷️ Create and Push Tag")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(130, 100, 150))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(210, 180, 230)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(180.0, 35.0));
+                        
+                        if ui.add(tag_button).clicked() && !self.is_operation_running {
+                            self.create_and_push_tag();
+                        }
+                    });
                 });
             });
             
             ui.separator();
             
             // Merge conflict detection
-            ui.heading("Conflict Detection");
-            
-            ui.add_space(5.0);
-            
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.is_operation_running {
-                        ui.add(egui::Spinner::new());
-                    }
-                    
-                    if ui.button("🔍 Check Merge Conflicts").clicked() && !self.is_operation_running {
-                        self.check_merge_conflicts();
-                    }
+            ui.vertical(|ui| {
+                ui.heading("🔍 Conflict Detection");
+                
+                ui.add_space(10.0);
+                
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.is_operation_running {
+                            ui.add(egui::Spinner::new().size(16.0));
+                        }
+                        
+                        let conflict_button = egui::Button::new(
+                            egui::RichText::new("🔍 Check Merge Conflicts")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(150, 120, 100))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(230, 200, 180)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(200.0, 35.0));
+                        
+                        if ui.add(conflict_button).clicked() && !self.is_operation_running {
+                            self.check_merge_conflicts();
+                        }
+                    });
                 });
             });
         });

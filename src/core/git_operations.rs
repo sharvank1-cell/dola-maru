@@ -405,3 +405,75 @@ pub fn verify_authentication(repo_info: &RepositoryInfo) -> Result<bool> {
         }
     }
 }
+
+// New function to clone a repository
+pub fn clone_repository(repo_info: &RepositoryInfo, destination_path: &str) -> Result<Repository> {
+    // Configure callbacks for authentication based on auth type
+    let mut callbacks = git2::RemoteCallbacks::new();
+    
+    match &repo_info.auth_type {
+        AuthType::SSH => {
+            callbacks.credentials(|_url, username_from_url, _allowed_types| {
+                let username = username_from_url.unwrap_or("git");
+                git2::Cred::ssh_key(
+                    username,
+                    None,
+                    Path::new(&repo_info.ssh_key_path),
+                    None,
+                )
+            });
+        },
+        AuthType::Token => {
+            callbacks.credentials(|_url, _username_from_url, _allowed_types| {
+                // For GitHub, we can use the token as username with 'x-oauth-basic' as password
+                git2::Cred::userpass_plaintext(&repo_info.auth_token, "x-oauth-basic")
+            });
+        },
+        AuthType::Default => {
+            callbacks.credentials(|_url, username_from_url, _allowed_types| {
+                git2::Cred::ssh_key(
+                    username_from_url.unwrap(),
+                    None,
+                    Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
+                    None,
+                )
+                .or_else(|_| git2::Cred::default())
+            });
+        }
+    }
+    
+    // Configure clone options
+    let mut fo = git2::FetchOptions::new();
+    fo.remote_callbacks(callbacks);
+    
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fo);
+    
+    // Clone the repository
+    let repo = builder.clone(&repo_info.url, Path::new(destination_path))?;
+    
+    // Add remote with the repository name
+    repo.remote(&repo_info.name, &repo_info.url)?;
+    
+    Ok(repo)
+}
+
+// New function to clone all repositories in a configuration
+pub fn clone_all_repositories(config: &RepoConfig, base_path: &str) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    
+    for repo_info in &config.repositories {
+        let destination_path = format!("{}/{}", base_path, repo_info.name);
+        
+        match clone_repository(repo_info, &destination_path) {
+            Ok(_) => {
+                results.push((repo_info.name.clone(), "Success".to_string()));
+            }
+            Err(e) => {
+                results.push((repo_info.name.clone(), format!("Failed: {}", e)));
+            }
+        }
+    }
+    
+    results
+}

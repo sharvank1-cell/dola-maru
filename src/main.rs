@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
 fn run_gui(config: Arc<Mutex<RepoConfig>>) -> Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 500.0])
+            .with_inner_size([600.0, 400.0]) // Set to 600x400 as per user preference
             .with_min_inner_size([300.0, 220.0])
             .with_icon(
                 eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
