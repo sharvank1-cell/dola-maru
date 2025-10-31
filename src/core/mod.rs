@@ -5,6 +5,7 @@ pub mod error_handler;
 pub mod oauth;
 pub mod batch_operations;
 pub mod repository_stats;
+pub mod repository_comparison;
 
 #[cfg(test)]
 mod repository_tests;
