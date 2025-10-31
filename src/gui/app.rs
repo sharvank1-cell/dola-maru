@@ -67,6 +67,10 @@ pub struct MultiRepoPusherApp {
     edit_account_ssh_key: String,
     // Commit history viewer
     commit_history_viewer: CommitHistoryViewer,
+    // Search and filter fields
+    search_text: String,
+    filter_by_group: String,
+    filter_by_auth_type: Option<AuthType>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -154,6 +158,10 @@ impl MultiRepoPusherApp {
             edit_account_ssh_key: String::new(),
             // Commit history viewer
             commit_history_viewer: CommitHistoryViewer::new(config.clone()),
+            // Search and filter fields
+            search_text: String::new(),
+            filter_by_group: String::new(),
+            filter_by_auth_type: None,
         }
     }
     
@@ -1290,9 +1298,85 @@ impl MultiRepoPusherApp {
             
             ui.add_space(10.0);
             
+            // Get groups for filter dropdown
+            let config_clone = self.config.clone();
+            let groups = config_clone.lock().unwrap().groups.clone();
+            
+            // Search and filter controls
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("🔍 Search:").strong().size(14.0));
+                ui.add_sized([150.0, 25.0], egui::TextEdit::singleline(&mut self.search_text).hint_text("Search repositories..."));
+                
+                ui.add_space(10.0);
+                
+                ui.label(egui::RichText::new("Filter by Group:").strong().size(14.0));
+                egui::ComboBox::from_id_source("filter_group")
+                    .selected_text(if self.filter_by_group.is_empty() { "All Groups" } else { &self.filter_by_group })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.filter_by_group, String::new(), "All Groups");
+                        for group in &groups {
+                            ui.selectable_value(&mut self.filter_by_group, group.name.clone(), &group.name);
+                        }
+                    });
+                
+                ui.add_space(10.0);
+                
+                ui.label(egui::RichText::new("Filter by Auth:").strong().size(14.0));
+                egui::ComboBox::from_id_source("filter_auth")
+                    .selected_text(match &self.filter_by_auth_type {
+                        Some(AuthType::SSH) => "SSH",
+                        Some(AuthType::Token) => "Token",
+                        Some(AuthType::Default) => "Default",
+                        None => "All Auth Types",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.filter_by_auth_type, None, "All Auth Types");
+                        ui.selectable_value(&mut self.filter_by_auth_type, Some(AuthType::SSH), "SSH");
+                        ui.selectable_value(&mut self.filter_by_auth_type, Some(AuthType::Token), "Token");
+                        ui.selectable_value(&mut self.filter_by_auth_type, Some(AuthType::Default), "Default");
+                    });
+                
+                // Clear filters button
+                let clear_button = egui::Button::new(
+                    egui::RichText::new("❌ Clear")
+                        .size(12.0)
+                )
+                .fill(egui::Color32::from_rgb(150, 80, 80))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 150, 150)))
+                .rounding(egui::Rounding::same(4.0))
+                .min_size(egui::Vec2::new(60.0, 25.0));
+                
+                if ui.add(clear_button).clicked() {
+                    self.search_text.clear();
+                    self.filter_by_group.clear();
+                    self.filter_by_auth_type = None;
+                }
+            });
+            
+            ui.add_space(10.0);
+            
             // Repository list with premium styling and increased height
             let config = self.config.clone();
-            let repos = config.lock().unwrap().repositories.clone();
+            let mut repos = config.lock().unwrap().repositories.clone();
+            
+            // Apply search filter
+            if !self.search_text.is_empty() {
+                let search_term = self.search_text.to_lowercase();
+                repos.retain(|repo| {
+                    repo.name.to_lowercase().contains(&search_term) || 
+                    repo.url.to_lowercase().contains(&search_term)
+                });
+            }
+            
+            // Apply group filter
+            if !self.filter_by_group.is_empty() {
+                repos.retain(|repo| repo.group == self.filter_by_group);
+            }
+            
+            // Apply auth type filter
+            if let Some(auth_type) = &self.filter_by_auth_type {
+                repos.retain(|repo| &repo.auth_type == auth_type);
+            }
             
             if repos.is_empty() {
                 ui.vertical_centered(|ui| {
