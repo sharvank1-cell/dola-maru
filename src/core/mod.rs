@@ -1,6 +1,9 @@
 pub mod repository;
 pub mod git_operations;
 pub mod commit_history;
+pub mod error_handler;
+pub mod oauth;
+pub mod batch_operations;
 
 #[cfg(test)]
 mod repository_tests;
@@ -16,3 +19,9 @@ mod account_management_tests;
 
 #[cfg(test)]
 mod commit_history_tests;
+
+#[cfg(test)]
+mod error_handler_tests;
+
+#[cfg(test)]
+mod batch_operations_tests;
