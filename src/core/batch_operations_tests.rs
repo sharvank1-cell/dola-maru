@@ -321,10 +321,10 @@ mod tests {
         
         // Test that operations are case-sensitive
         let push_results1 = push_to_group_repositories(&config, "TestGroup", "Test commit", "main");
-        assert_eq!(push_results1.len(), 2); // 1 repository + 1 note
+        assert_eq!(push_results1.len(), 3); // 1 repository + 1 note + 1 simulated result
         
         let push_results2 = push_to_group_repositories(&config, "testgroup", "Test commit", "main");
-        assert_eq!(push_results2.len(), 2); // 1 repository + 1 note
+        assert_eq!(push_results2.len(), 3); // 1 repository + 1 note + 1 simulated result
         
         // Verify they return different results
         let repo_names1: Vec<&str> = push_results1.iter().map(|(name, _)| name.as_str()).collect();
