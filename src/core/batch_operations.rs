@@ -1,4 +1,4 @@
-use crate::core::repository::{RepoConfig, RepositoryInfo};
+use crate::core::repository::RepoConfig;
 use crate::core::git_operations::{
     push_to_remote, 
     pull_from_remote, 
@@ -8,7 +8,6 @@ use crate::core::git_operations::{
 };
 use crate::core::error_handler::format_error_result;
 use git2::Repository;
-use anyhow::Result;
 
 /// Perform push operation on all repositories in a group
 pub fn push_to_group_repositories(
