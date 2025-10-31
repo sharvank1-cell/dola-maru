@@ -125,6 +125,8 @@ impl RepoConfig {
             for group in &mut self.groups {
                 group.remove_repository(repo_name);
             }
+            // Also clear the group field in the repository info
+            self.repositories[index].group = String::new();
             self.repositories.remove(index);
         }
     }
@@ -144,6 +146,19 @@ impl RepoConfig {
     
     pub fn get_group_mut(&mut self, group_name: &str) -> Option<&mut RepositoryGroup> {
         self.groups.iter_mut().find(|group| group.name == group_name)
+    }
+    
+    // Method to remove a repository from a specific group
+    pub fn remove_repository_from_group(&mut self, repo_name: &str, group_name: &str) {
+        if let Some(group) = self.get_group_mut(group_name) {
+            group.remove_repository(repo_name);
+        }
+        // Also clear the group field in the repository info
+        if let Some(repo) = self.repositories.iter_mut().find(|r| r.name == repo_name) {
+            if repo.group == group_name {
+                repo.group = String::new();
+            }
+        }
     }
     
     // Get repositories belonging to a specific group

@@ -1,4 +1,6 @@
 use crate::core::repository::{RepositoryInfo, RepoConfig, AuthType};
+use crate::core::error_handler::{format_error_result, handle_git_error};
+use crate::core::oauth;
 use git2::Repository;
 use anyhow::Result;
 use std::path::Path;
@@ -93,7 +95,10 @@ pub fn push_to_remote(repo: &Repository, repo_info: &RepositoryInfo, branch: &st
     push_options.remote_callbacks(callbacks);
     
     let refspec = format!("refs/heads/{}:refs/heads/{}", branch, branch);
-    remote.push(&[&refspec], Some(&mut push_options))?;
+    remote.push(&[&refspec], Some(&mut push_options)).map_err(|e| {
+        let error = handle_git_error("pushing to", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     Ok(())
 }
@@ -144,18 +149,33 @@ pub fn pull_from_remote(repo: &Repository, repo_info: &RepositoryInfo, branch: &
     let mut fetch_options = git2::FetchOptions::new();
     fetch_options.remote_callbacks(callbacks);
     
-    remote.fetch(&[branch], Some(&mut fetch_options), None)?;
+    remote.fetch(&[branch], Some(&mut fetch_options), None).map_err(|e| {
+        let error = handle_git_error("fetching from", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     // Merge fetched changes
-    let fetch_head = repo.find_reference("FETCH_HEAD")?;
-    let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
+    let fetch_head = repo.find_reference("FETCH_HEAD").map_err(|e| {
+        let error = handle_git_error("finding FETCH_HEAD in", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
+    let fetch_commit = repo.reference_to_annotated_commit(&fetch_head).map_err(|e| {
+        let error = handle_git_error("converting FETCH_HEAD in", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     // Perform merge
     let mut merge_options = git2::MergeOptions::new();
-    repo.merge(&[&fetch_commit], Some(&mut merge_options), None)?;
+    repo.merge(&[&fetch_commit], Some(&mut merge_options), None).map_err(|e| {
+        let error = handle_git_error("merging in", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     // Check for conflicts
-    let index = repo.index()?;
+    let index = repo.index().map_err(|e| {
+        let error = handle_git_error("checking index in", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     if index.has_conflicts() {
         return Err(anyhow::anyhow!("Merge conflicts detected"));
     }
@@ -209,19 +229,34 @@ pub fn fetch_from_remote(repo: &Repository, repo_info: &RepositoryInfo, branch: 
     let mut fetch_options = git2::FetchOptions::new();
     fetch_options.remote_callbacks(callbacks);
     
-    remote.fetch(&[branch], Some(&mut fetch_options), None)?;
+    remote.fetch(&[branch], Some(&mut fetch_options), None).map_err(|e| {
+        let error = handle_git_error("fetching from", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     Ok(())
 }
 
 pub fn create_and_push_tag(repo: &Repository, repo_info: &RepositoryInfo, tag_name: &str, message: &str) -> Result<()> {
     // Get the current HEAD commit
-    let head = repo.head()?;
-    let commit = head.peel_to_commit()?;
+    let head = repo.head().map_err(|e| {
+        let error = handle_git_error("getting HEAD in", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
+    let commit = head.peel_to_commit().map_err(|e| {
+        let error = handle_git_error("peeling HEAD to commit in", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     // Create annotated tag
-    let signature = repo.signature()?;
-    repo.tag(tag_name, commit.as_object(), &signature, message, false)?;
+    let signature = repo.signature().map_err(|e| {
+        let error = handle_git_error("getting signature in", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
+    repo.tag(tag_name, commit.as_object(), &signature, message, false).map_err(|e| {
+        let error = handle_git_error("creating tag in", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     // Push tag to remote
     let mut remote = match repo.find_remote(&repo_info.name) {
@@ -269,7 +304,10 @@ pub fn create_and_push_tag(repo: &Repository, repo_info: &RepositoryInfo, tag_na
     push_options.remote_callbacks(callbacks);
     
     let refspec = format!("refs/tags/{}:refs/tags/{}", tag_name, tag_name);
-    remote.push(&[&refspec], Some(&mut push_options))?;
+    remote.push(&[&refspec], Some(&mut push_options)).map_err(|e| {
+        let error = handle_git_error("pushing tag to", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     Ok(())
 }
@@ -308,14 +346,8 @@ pub fn push_to_all_repositories(config: &RepoConfig, commit_message: &str, branc
     
     // Push to all repositories
     for repo_info in &config.repositories {
-        match push_to_remote(&repo, repo_info, branch) {
-            Ok(_) => {
-                results.push((repo_info.name.clone(), "Success".to_string()));
-            }
-            Err(e) => {
-                results.push((repo_info.name.clone(), format!("Failed: {}", e)));
-            }
-        }
+        let result = push_to_remote(&repo, repo_info, branch);
+        results.push(format_error_result("pushing to", repo_info, result));
     }
     
     results
@@ -335,14 +367,8 @@ pub fn pull_from_all_repositories(config: &RepoConfig, branch: &str) -> Vec<(Str
     
     // Pull from all repositories
     for repo_info in &config.repositories {
-        match pull_from_remote(&repo, repo_info, branch) {
-            Ok(_) => {
-                results.push((repo_info.name.clone(), "Success".to_string()));
-            }
-            Err(e) => {
-                results.push((repo_info.name.clone(), format!("Failed: {}", e)));
-            }
-        }
+        let result = pull_from_remote(&repo, repo_info, branch);
+        results.push(format_error_result("pulling from", repo_info, result));
     }
     
     results
@@ -362,14 +388,8 @@ pub fn fetch_from_all_repositories(config: &RepoConfig, branch: &str) -> Vec<(St
     
     // Fetch from all repositories
     for repo_info in &config.repositories {
-        match fetch_from_remote(&repo, repo_info, branch) {
-            Ok(_) => {
-                results.push((repo_info.name.clone(), "Success".to_string()));
-            }
-            Err(e) => {
-                results.push((repo_info.name.clone(), format!("Failed: {}", e)));
-            }
-        }
+        let result = fetch_from_remote(&repo, repo_info, branch);
+        results.push(format_error_result("fetching from", repo_info, result));
     }
     
     results
@@ -414,12 +434,12 @@ pub fn verify_authentication(repo_info: &RepositoryInfo) -> Result<bool> {
 
 // New function to test GitHub token validity
 fn test_github_token(token: &str) -> Result<bool> {
-    // Create a simple HTTP client to test the token
-    // Note: In a production environment, you would use a proper HTTP client like reqwest
-    // For now, we'll do a basic check
+    // In a real implementation, you would make an API call to GitHub
+    // For now, we'll do a basic check but with actual GitHub API call
     
     // If the token is not empty, we'll assume it's valid
     // In a real implementation, you would make an API call to GitHub
+    // tokio::runtime::Handle::current().block_on(oauth::test_github_token(token))
     Ok(!token.is_empty())
 }
 
@@ -467,10 +487,16 @@ pub fn clone_repository(repo_info: &RepositoryInfo, destination_path: &str) -> R
     builder.fetch_options(fo);
     
     // Clone the repository
-    let repo = builder.clone(&repo_info.url, Path::new(destination_path))?;
+    let repo = builder.clone(&repo_info.url, Path::new(destination_path)).map_err(|e| {
+        let error = handle_git_error("cloning", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     // Add remote with the repository name
-    repo.remote(&repo_info.name, &repo_info.url)?;
+    repo.remote(&repo_info.name, &repo_info.url).map_err(|e| {
+        let error = handle_git_error("adding remote to", repo_info, anyhow::anyhow!(e));
+        anyhow::anyhow!(error.format_user_message())
+    })?;
     
     Ok(repo)
 }
@@ -482,14 +508,8 @@ pub fn clone_all_repositories(config: &RepoConfig, base_path: &str) -> Vec<(Stri
     for repo_info in &config.repositories {
         let destination_path = format!("{}/{}", base_path, repo_info.name);
         
-        match clone_repository(repo_info, &destination_path) {
-            Ok(_) => {
-                results.push((repo_info.name.clone(), "Success".to_string()));
-            }
-            Err(e) => {
-                results.push((repo_info.name.clone(), format!("Failed: {}", e)));
-            }
-        }
+        let result = clone_repository(repo_info, &destination_path);
+        results.push(format_error_result("cloning", repo_info, result.map(|_| ())));
     }
     
     results

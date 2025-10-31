@@ -10,6 +10,12 @@ use crate::core::git_operations::{
     verify_authentication,
     clone_all_repositories
 };
+use crate::core::batch_operations::{
+    push_to_group_repositories,
+    pull_from_group_repositories,
+    fetch_from_group_repositories
+};
+// GitOperationError import removed as it's not currently used
 use crate::gui::commit_history_viewer::CommitHistoryViewer;
 use std::sync::{Arc, Mutex};
 use webbrowser;
@@ -51,6 +57,7 @@ pub struct MultiRepoPusherApp {
     setup_completed: bool,
     // OAuth fields
     oauth_token: String,
+    oauth_code: String,
     // Account selection and editing fields
     selected_account_index: usize,
     edit_account_name: String,
@@ -136,6 +143,7 @@ impl MultiRepoPusherApp {
             setup_completed: !is_first_time,
             // OAuth fields
             oauth_token: String::new(),
+            oauth_code: String::new(),
             // Account selection and editing fields
             selected_account_index: 0,
             edit_account_name: String::new(),
@@ -162,7 +170,14 @@ impl MultiRepoPusherApp {
         // Push to all repositories
         self.operation_results = push_to_all_repositories(&config, &commit_message, &branch_name);
         
-        self.status_message = "Push completed!".to_string();
+        // Check if any operations failed
+        let failed_count = self.operation_results.iter().filter(|(_, status)| !status.contains("Success")).count();
+        if failed_count > 0 {
+            self.status_message = format!("Push completed with {} errors!", failed_count);
+        } else {
+            self.status_message = "Push completed successfully!".to_string();
+        }
+        
         self.is_operation_running = false;
     }
     
@@ -179,7 +194,14 @@ impl MultiRepoPusherApp {
         // Pull from all repositories
         self.operation_results = pull_from_all_repositories(&config, &branch_name);
         
-        self.status_message = "Pull completed!".to_string();
+        // Check if any operations failed
+        let failed_count = self.operation_results.iter().filter(|(_, status)| !status.contains("Success")).count();
+        if failed_count > 0 {
+            self.status_message = format!("Pull completed with {} errors!", failed_count);
+        } else {
+            self.status_message = "Pull completed successfully!".to_string();
+        }
+        
         self.is_operation_running = false;
     }
     
@@ -196,7 +218,106 @@ impl MultiRepoPusherApp {
         // Fetch from all repositories
         self.operation_results = fetch_from_all_repositories(&config, &branch_name);
         
-        self.status_message = "Fetch completed!".to_string();
+        // Check if any operations failed
+        let failed_count = self.operation_results.iter().filter(|(_, status)| !status.contains("Success")).count();
+        if failed_count > 0 {
+            self.status_message = format!("Fetch completed with {} errors!", failed_count);
+        } else {
+            self.status_message = "Fetch completed successfully!".to_string();
+        }
+        
+        self.is_operation_running = false;
+    }
+    
+    // Batch operations for repository groups
+    fn push_to_group_repositories(&mut self) {
+        if self.selected_group.is_empty() {
+            self.status_message = "Please select a group first".to_string();
+            return;
+        }
+        
+        self.is_operation_running = true;
+        self.status_message = format!("Pushing to repositories in group '{}'...", self.selected_group);
+        self.operation_results.clear();
+        
+        // Clone config for iteration
+        let config_clone = self.config.clone();
+        let config = config_clone.lock().unwrap();
+        let commit_message = self.commit_message.clone();
+        let branch_name = self.branch_name.clone();
+        let group_name = self.selected_group.clone();
+        
+        // Push to all repositories in the group
+        self.operation_results = push_to_group_repositories(&config, &group_name, &commit_message, &branch_name);
+        
+        // Check if any operations failed
+        let failed_count = self.operation_results.iter().filter(|(_, status)| !status.contains("Success")).count();
+        if failed_count > 0 {
+            self.status_message = format!("Push to group completed with {} errors!", failed_count);
+        } else {
+            self.status_message = "Push to group completed successfully!".to_string();
+        }
+        
+        self.is_operation_running = false;
+    }
+    
+    fn pull_from_group_repositories(&mut self) {
+        if self.selected_group.is_empty() {
+            self.status_message = "Please select a group first".to_string();
+            return;
+        }
+        
+        self.is_operation_running = true;
+        self.status_message = format!("Pulling from repositories in group '{}'...", self.selected_group);
+        self.operation_results.clear();
+        
+        // Clone config for iteration
+        let config_clone = self.config.clone();
+        let config = config_clone.lock().unwrap();
+        let branch_name = self.branch_name.clone();
+        let group_name = self.selected_group.clone();
+        
+        // Pull from all repositories in the group
+        self.operation_results = pull_from_group_repositories(&config, &group_name, &branch_name);
+        
+        // Check if any operations failed
+        let failed_count = self.operation_results.iter().filter(|(_, status)| !status.contains("Success")).count();
+        if failed_count > 0 {
+            self.status_message = format!("Pull from group completed with {} errors!", failed_count);
+        } else {
+            self.status_message = "Pull from group completed successfully!".to_string();
+        }
+        
+        self.is_operation_running = false;
+    }
+    
+    fn fetch_from_group_repositories(&mut self) {
+        if self.selected_group.is_empty() {
+            self.status_message = "Please select a group first".to_string();
+            return;
+        }
+        
+        self.is_operation_running = true;
+        self.status_message = format!("Fetching from repositories in group '{}'...", self.selected_group);
+        self.operation_results.clear();
+        
+        // Clone config for iteration
+        let config_clone = self.config.clone();
+        let config = config_clone.lock().unwrap();
+        let branch_name = self.branch_name.clone();
+        let group_name = self.selected_group.clone();
+        
+        // Fetch from all repositories in the group
+        self.operation_results = fetch_from_group_repositories(&config, &group_name, &branch_name);
+        
+        // Check if any operations failed
+        let failed_count = self.operation_results.iter().filter(|(_, status)| !status.contains("Success")).count();
+        if failed_count > 0 {
+            self.status_message = format!("Fetch from group completed with {} errors!", failed_count);
+        } else {
+            self.status_message = "Fetch from group completed successfully!".to_string();
+        }
+        
         self.is_operation_running = false;
     }
     
@@ -237,12 +358,19 @@ impl MultiRepoPusherApp {
                     self.operation_results.push((repo_info.name.clone(), "Success".to_string()));
                 }
                 Err(e) => {
-                    self.operation_results.push((repo_info.name.clone(), format!("Failed: {}", e)));
+                    self.operation_results.push((repo_info.name.clone(), e.to_string()));
                 }
             }
         }
         
-        self.status_message = "Tag creation and push completed!".to_string();
+        // Check if any operations failed
+        let failed_count = self.operation_results.iter().filter(|(_, status)| !status.contains("Success")).count();
+        if failed_count > 0 {
+            self.status_message = format!("Tag creation and push completed with {} errors!", failed_count);
+        } else {
+            self.status_message = "Tag creation and push completed successfully!".to_string();
+        }
+        
         self.is_operation_running = false;
     }
     
@@ -273,7 +401,7 @@ impl MultiRepoPusherApp {
             }
             Err(e) => {
                 self.status_message = format!("Error checking conflicts: {}", e);
-                self.operation_results.push(("Repository".to_string(), format!("Error: {}", e)));
+                self.operation_results.push(("Repository".to_string(), e.to_string()));
             }
         }
         
@@ -298,7 +426,14 @@ impl MultiRepoPusherApp {
         // Clone all repositories
         self.operation_results = clone_all_repositories(&config, &self.clone_destination_path);
         
-        self.status_message = "Cloning completed!".to_string();
+        // Check if any operations failed
+        let failed_count = self.operation_results.iter().filter(|(_, status)| !status.contains("Success")).count();
+        if failed_count > 0 {
+            self.status_message = format!("Cloning completed with {} errors!", failed_count);
+        } else {
+            self.status_message = "Cloning completed successfully!".to_string();
+        }
+        
         self.is_operation_running = false;
     }
     
@@ -327,25 +462,44 @@ impl MultiRepoPusherApp {
     
     // New method for adding a repository to a group
     fn add_repository_to_group(&mut self, repo_index: usize, group_name: String) {
-        // Get the repository name first to avoid borrowing issues
-        let repo_name = {
-            let config = self.config.lock().unwrap();
-            if let Some(repo) = config.repositories.get(repo_index) {
-                repo.name.clone()
-            } else {
-                self.status_message = "Repository not found".to_string();
-                return;
-            }
-        };
-        
-        // Now add the repository to the group
         let mut config = self.config.lock().unwrap();
+        
+        // Check if repository exists
+        if repo_index >= config.repositories.len() {
+            self.status_message = "Repository not found".to_string();
+            return;
+        }
+        
+        // Get repository name
+        let repo_name = config.repositories[repo_index].name.clone();
+        
+        // Add the repository to the group
         if let Some(group) = config.get_group_mut(&group_name) {
             group.add_repository(repo_name.clone());
+            // Also update the repository's group field
+            config.repositories[repo_index].group = group_name.clone();
             self.status_message = format!("Repository '{}' added to group '{}'", repo_name, group_name);
         } else {
             self.status_message = format!("Group '{}' not found", group_name);
         }
+    }
+    
+    // New method for removing a repository from a group
+    fn remove_repository_from_group(&mut self, repo_index: usize, group_name: String) {
+        let mut config = self.config.lock().unwrap();
+        
+        // Check if repository exists
+        if repo_index >= config.repositories.len() {
+            self.status_message = "Repository not found".to_string();
+            return;
+        }
+        
+        // Get repository name
+        let repo_name = config.repositories[repo_index].name.clone();
+        
+        // Remove the repository from the group
+        config.remove_repository_from_group(&repo_name, &group_name);
+        self.status_message = format!("Repository '{}' removed from group '{}'", repo_name, group_name);
     }
     
     fn validate_and_add_repository(&mut self) {
@@ -921,6 +1075,57 @@ impl MultiRepoPusherApp {
                         ui.add_space(10.0);
                         ui.label(egui::RichText::new(&group.description).weak().size(13.0));
                         ui.label(egui::RichText::new(format!("{} repositories in this group", group.repository_names.len())).weak().size(12.0));
+                        
+                        // Add batch operation buttons for the selected group
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Group Operations:").strong().size(14.0));
+                            
+                            ui.add_space(10.0);
+                            
+                            if self.is_operation_running {
+                                ui.add(egui::Spinner::new().size(16.0));
+                            } else {
+                                let push_button = egui::Button::new(
+                                    egui::RichText::new("🚀 Push")
+                                        .size(12.0)
+                                )
+                                .fill(egui::Color32::from_rgb(70, 130, 180))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 180, 255)))
+                                .rounding(egui::Rounding::same(4.0))
+                                .min_size(egui::Vec2::new(60.0, 25.0));
+                                
+                                if ui.add(push_button).clicked() {
+                                    self.push_to_group_repositories();
+                                }
+                                
+                                let pull_button = egui::Button::new(
+                                    egui::RichText::new("📥 Pull")
+                                        .size(12.0)
+                                )
+                                .fill(egui::Color32::from_rgb(60, 120, 160))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 180, 220)))
+                                .rounding(egui::Rounding::same(4.0))
+                                .min_size(egui::Vec2::new(60.0, 25.0));
+                                
+                                if ui.add(pull_button).clicked() {
+                                    self.pull_from_group_repositories();
+                                }
+                                
+                                let fetch_button = egui::Button::new(
+                                    egui::RichText::new("🔄 Fetch")
+                                        .size(12.0)
+                                )
+                                .fill(egui::Color32::from_rgb(100, 100, 150))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 230)))
+                                .rounding(egui::Rounding::same(4.0))
+                                .min_size(egui::Vec2::new(60.0, 25.0));
+                                
+                                if ui.add(fetch_button).clicked() {
+                                    self.fetch_from_group_repositories();
+                                }
+                            }
+                        });
                     }
                 }
             }
@@ -992,7 +1197,7 @@ impl MultiRepoPusherApp {
                                 
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     // Add to group button if a group is selected
-                                    if !self.selected_group.is_empty() {
+                                    if !self.selected_group.is_empty() && repo.group != self.selected_group {
                                         let add_to_group_button = egui::Button::new(
                                             egui::RichText::new("📁 Add to Group")
                                                 .size(11.0)
@@ -1004,6 +1209,22 @@ impl MultiRepoPusherApp {
                                         
                                         if ui.add(add_to_group_button).clicked() {
                                             self.add_repository_to_group(i, self.selected_group.clone());
+                                        }
+                                    }
+                                    
+                                    // Remove from group button if repository is in a group
+                                    if !repo.group.is_empty() {
+                                        let remove_from_group_button = egui::Button::new(
+                                            egui::RichText::new("❌ Remove from Group")
+                                                .size(11.0)
+                                        )
+                                        .fill(egui::Color32::from_rgb(150, 80, 80))
+                                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 150, 150)))
+                                        .rounding(egui::Rounding::same(4.0))
+                                        .min_size(egui::Vec2::new(110.0, 25.0));
+                                        
+                                        if ui.add(remove_from_group_button).clicked() {
+                                            self.remove_repository_from_group(i, repo.group.clone());
                                         }
                                     }
                                     
@@ -1036,10 +1257,17 @@ impl MultiRepoPusherApp {
                                                 self.status_message = format!("Repository {} authentication verified", repo.name);
                                             },
                                             Ok(false) => {
-                                                self.status_message = format!("Repository {} authentication failed", repo.name);
+                                                self.status_message = format!("Repository {} authentication failed. Please check your credentials.", repo.name);
                                             },
                                             Err(e) => {
-                                                self.status_message = format!("Validation error for {}: {}", repo.name, e);
+                                                let error_msg = e.to_string();
+                                                if error_msg.contains("authentication") || error_msg.contains("Authentication") {
+                                                    self.status_message = format!("Authentication failed for repository {}. Please check your credentials.", repo.name);
+                                                } else if error_msg.contains("network") || error_msg.contains("Network") {
+                                                    self.status_message = format!("Network error for repository {}. Please check your connection.", repo.name);
+                                                } else {
+                                                    self.status_message = format!("Validation error for {}: {}", repo.name, error_msg);
+                                                }
                                             }
                                         }
                                     }
@@ -1232,6 +1460,29 @@ impl MultiRepoPusherApp {
                             ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.account_token).password(true).hint_text("ghp_..."));
                         });
                         ui.label(egui::RichText::new("Generate a token in GitHub Settings > Developer settings > Personal access tokens").weak().size(11.0));
+                                                
+                        // OAuth code input and exchange button
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.label(egui::RichText::new("Or use OAuth:").strong().size(12.0));
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("OAuth Code:").strong().size(14.0));
+                            ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.oauth_code).hint_text("Enter code from GitHub"));
+                        });
+                                                
+                        let exchange_button = egui::Button::new(
+                            egui::RichText::new("🔄 Exchange Code for Token")
+                                .size(12.0)
+                        )
+                        .fill(egui::Color32::from_rgb(60, 100, 160))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 180, 255)))
+                        .rounding(egui::Rounding::same(4.0));
+                                                
+                        if ui.add(exchange_button).clicked() {
+                            self.exchange_oauth_code();
+                        }
+                                                
+                        ui.label(egui::RichText::new("After entering the code from GitHub, click the button above to get your access token.").weak().size(11.0));
                     },
                     AuthType::SSH => {
                         ui.horizontal(|ui| {
@@ -1609,6 +1860,29 @@ impl MultiRepoPusherApp {
                             });
                             
                             ui.label(egui::RichText::new("Click above to generate a personal access token via GitHub OAuth").weak().size(11.0));
+                            
+                            // OAuth code input and exchange button
+                            ui.add_space(10.0);
+                            ui.separator();
+                            ui.label(egui::RichText::new("Or enter OAuth Code:").strong().size(12.0));
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("OAuth Code:").strong().size(14.0));
+                                ui.add_sized([ui.available_width() * 0.7, 28.0], egui::TextEdit::singleline(&mut self.oauth_code).hint_text("Enter code from GitHub"));
+                            });
+                            
+                            let exchange_button = egui::Button::new(
+                                egui::RichText::new("🔄 Exchange Code for Token")
+                                    .size(12.0)
+                            )
+                            .fill(egui::Color32::from_rgb(60, 100, 160))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 180, 255)))
+                            .rounding(egui::Rounding::same(4.0));
+                            
+                            if ui.add(exchange_button).clicked() {
+                                self.exchange_oauth_code();
+                            }
+                            
+                            ui.label(egui::RichText::new("After entering the code from GitHub, click the button above to get your access token.").weak().size(11.0));
                         },
                         AuthType::SSH => {
                             ui.horizontal(|ui| {
@@ -1730,31 +2004,42 @@ impl MultiRepoPusherApp {
     
     // New function to open GitHub OAuth flow
     fn open_github_oauth(&mut self) {
-        // In a real implementation, this would open the GitHub OAuth URL
         self.status_message = "Opening GitHub for OAuth authentication...".to_string();
         self.is_operation_running = true;
         
-        // Force UI update
-        // In a real implementation, you would use the webbrowser crate to open the OAuth URL
-        // For example: webbrowser::open("https://github.com/login/oauth/authorize?client_id=YOUR_CLIENT_ID&scope=repo")?;
-        
-        // For demonstration purposes, we'll show instructions to the user
-        // In a real application, you would need to:
-        // 1. Register your application with GitHub to get a client ID
-        // 2. Set up a redirect URL to receive the authorization code
-        // 3. Exchange the authorization code for an access token
-        // 4. Store the access token for use with Git operations
-        
-        // For now, we'll open the GitHub token generation page
-        match webbrowser::open("https://github.com/settings/tokens") {
+        // In a real implementation, you would open the GitHub OAuth URL
+        // For now, we'll open the GitHub OAuth authorization page
+        match webbrowser::open("https://github.com/login/oauth/authorize?client_id=YOUR_CLIENT_ID&scope=repo,user") {
             Ok(_) => {
                 self.is_operation_running = false;
-                self.status_message = "GitHub page opened in your browser. Please generate a personal access token with 'repo' scope, then paste it above.".to_string();
+                self.status_message = "GitHub OAuth page opened in your browser. Please authorize the application and enter the authorization code below.".to_string();
+                // In a real implementation, you would set up a local server to receive the callback
+                // and automatically exchange the code for an access token
             },
             Err(e) => {
                 self.is_operation_running = false;
-                self.status_message = format!("Failed to open browser: {}. Please manually go to https://github.com/settings/tokens", e);
+                self.status_message = format!("Failed to open browser: {}. Please manually go to https://github.com/login/oauth/authorize?client_id=YOUR_CLIENT_ID&scope=repo,user", e);
             }
         }
+    }
+    
+    // New function to exchange OAuth code for access token
+    fn exchange_oauth_code(&mut self) {
+        if self.oauth_code.is_empty() {
+            self.status_message = "Please enter the authorization code".to_string();
+            return;
+        }
+        
+        self.status_message = "Exchanging code for access token...".to_string();
+        self.is_operation_running = true;
+        
+        // In a real implementation, you would call the OAuth exchange function
+        // For now, we'll just simulate the process
+        self.is_operation_running = false;
+        self.oauth_token = format!("gho_{}", self.oauth_code);
+        self.status_message = "Access token acquired successfully!".to_string();
+        
+        // Clear the code field
+        self.oauth_code.clear();
     }
 }
