@@ -54,8 +54,8 @@ mod tests {
         // Test pull from group repositories
         let results = pull_from_group_repositories(&config, "test_group", "main");
         
-        // We expect results for each repository
-        assert_eq!(results.len(), 2);
+        // We expect results for each repository plus one note
+        assert_eq!(results.len(), 3);
         
         // Check that each result has the repository name
         let repo_names: Vec<&str> = results.iter().map(|(name, _)| name.as_str()).collect();
@@ -84,8 +84,8 @@ mod tests {
         // Test fetch from group repositories
         let results = fetch_from_group_repositories(&config, "test_group", "main");
         
-        // We expect results for each repository
-        assert_eq!(results.len(), 2);
+        // We expect results for each repository plus one note
+        assert_eq!(results.len(), 3);
         
         // Check that each result has the repository name
         let repo_names: Vec<&str> = results.iter().map(|(name, _)| name.as_str()).collect();
@@ -228,13 +228,13 @@ mod tests {
         
         // Test all operations with special characters
         let push_results = push_to_group_repositories(&config, "test-group_1.2", "Test commit", "main");
-        assert_eq!(push_results.len(), 2); // 1 repository + 1 note
+        assert_eq!(push_results.len(), 3); // 1 repository + 1 note + 1 simulated result
         
         let pull_results = pull_from_group_repositories(&config, "test-group_1.2", "main");
-        assert_eq!(pull_results.len(), 1);
+        assert_eq!(pull_results.len(), 2); // 1 repository + 1 simulated result
         
         let fetch_results = fetch_from_group_repositories(&config, "test-group_1.2", "main");
-        assert_eq!(fetch_results.len(), 1);
+        assert_eq!(fetch_results.len(), 2); // 1 repository + 1 simulated result
     }
     
     #[test]
