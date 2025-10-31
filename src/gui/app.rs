@@ -20,6 +20,9 @@ use crate::gui::commit_history_viewer::CommitHistoryViewer;
 use std::sync::{Arc, Mutex};
 use webbrowser;
 
+// Type alias for the save function
+type SaveConfigFn = fn(&RepoConfig) -> anyhow::Result<()>;
+
 pub struct MultiRepoPusherApp {
     config: Arc<Mutex<RepoConfig>>,
     commit_message: String,
@@ -73,6 +76,8 @@ pub struct MultiRepoPusherApp {
     filter_by_auth_type: Option<AuthType>,
     // Theme field
     dark_mode: bool,
+    // Save function for backup/restore
+    save_config_fn: SaveConfigFn,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -91,7 +96,7 @@ impl Default for Tab {
 }
 
 impl MultiRepoPusherApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, config: Arc<Mutex<RepoConfig>>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, config: Arc<Mutex<RepoConfig>>, save_config_fn: SaveConfigFn) -> Self {
         // Customize the look of the GUI with premium styling
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = egui::Color32::from_rgb(25, 25, 35); // Deep dark background
@@ -166,6 +171,8 @@ impl MultiRepoPusherApp {
             filter_by_auth_type: None,
             // Theme field
             dark_mode: true,
+            // Save function for backup/restore
+            save_config_fn,
         }
     }
     
@@ -2317,5 +2324,33 @@ impl MultiRepoPusherApp {
         
         // Clear the code field
         self.oauth_code.clear();
+    }
+    
+    // Backup current configuration to a file
+    fn backup_configuration(&mut self, backup_path: &str) -> Result<(), String> {
+        let config = self.config.lock().unwrap();
+        let config_str = serde_json::to_string_pretty(&*config)
+            .map_err(|e| format!("Failed to serialize configuration: {}", e))?;
+        std::fs::write(backup_path, config_str)
+            .map_err(|e| format!("Failed to write backup file: {}", e))
+    }
+    
+    // Restore configuration from a backup file
+    fn restore_configuration(&mut self, backup_path: &str) -> Result<(), String> {
+        let config_str = std::fs::read_to_string(backup_path)
+            .map_err(|e| format!("Failed to read backup file: {}", e))?;
+        let restored_config: RepoConfig = serde_json::from_str(&config_str)
+            .map_err(|e| format!("Failed to parse backup file: {}", e))?;
+        
+        let mut config = self.config.lock().unwrap();
+        *config = restored_config;
+        Ok(())
+    }
+    
+    // Save current configuration using the provided save function
+    fn save_current_configuration(&mut self) -> Result<(), String> {
+        let config = self.config.lock().unwrap();
+        (self.save_config_fn)(&config)
+            .map_err(|e| format!("Failed to save configuration: {}", e))
     }
 }
