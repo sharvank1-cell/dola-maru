@@ -71,6 +71,8 @@ pub struct MultiRepoPusherApp {
     search_text: String,
     filter_by_group: String,
     filter_by_auth_type: Option<AuthType>,
+    // Theme field
+    dark_mode: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -162,6 +164,8 @@ impl MultiRepoPusherApp {
             search_text: String::new(),
             filter_by_group: String::new(),
             filter_by_auth_type: None,
+            // Theme field
+            dark_mode: true,
         }
     }
     
@@ -366,6 +370,39 @@ impl MultiRepoPusherApp {
         
         self.is_operation_running = false;
         self.status_message = "Statistics collected successfully!".to_string();
+    }
+    
+    // Method to apply theme based on current setting
+    fn apply_theme(&mut self, ctx: &egui::Context) {
+        if self.dark_mode {
+            // Dark theme
+            let mut visuals = egui::Visuals::dark();
+            visuals.panel_fill = egui::Color32::from_rgb(25, 25, 35); // Deep dark background
+            visuals.window_fill = egui::Color32::from_rgb(35, 35, 50); // Slightly lighter window
+            visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 70, 100));
+            visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(40, 40, 60);
+            visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::from_rgb(200, 200, 220);
+            visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(55, 55, 80);
+            visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(80, 80, 130);
+            visuals.widgets.active.bg_fill = egui::Color32::from_rgb(100, 100, 180);
+            visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
+            visuals.selection.bg_fill = egui::Color32::from_rgb(90, 90, 150);
+            ctx.set_visuals(visuals);
+        } else {
+            // Light theme
+            let mut visuals = egui::Visuals::light();
+            visuals.panel_fill = egui::Color32::from_rgb(240, 240, 250); // Light background
+            visuals.window_fill = egui::Color32::from_rgb(255, 255, 255); // White window
+            visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 220));
+            visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(230, 230, 240);
+            visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::from_rgb(50, 50, 70);
+            visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(220, 220, 235);
+            visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(180, 180, 210);
+            visuals.widgets.active.bg_fill = egui::Color32::from_rgb(100, 100, 180);
+            visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
+            visuals.selection.bg_fill = egui::Color32::from_rgb(120, 120, 190);
+            ctx.set_visuals(visuals);
+        }
     }
     
     // Batch operations for repository groups
@@ -780,6 +817,9 @@ impl MultiRepoPusherApp {
 
 impl eframe::App for MultiRepoPusherApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Apply theme
+        self.apply_theme(ctx);
+        
         // Update animation timer
         self.animation_timer += ctx.input(|i| i.stable_dt);
         
@@ -940,14 +980,33 @@ impl eframe::App for MultiRepoPusherApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Header with title and styling
             ui.vertical_centered(|ui| {
-                // Animated title with gradient effect
-                let hue = (self.animation_timer * 0.5).sin() * 0.5 + 0.5;
-                let color = egui::Color32::from_rgb(
-                    (hue * 255.0) as u8,
-                    ((1.0 - hue) * 255.0) as u8,
-                    (hue * 128.0) as u8
-                );
-                ui.heading(egui::RichText::new("Multi-Repo Pusher").size(28.0).color(color));
+                ui.horizontal(|ui| {
+                    // Animated title with gradient effect
+                    let hue = (self.animation_timer * 0.5).sin() * 0.5 + 0.5;
+                    let color = egui::Color32::from_rgb(
+                        (hue * 255.0) as u8,
+                        ((1.0 - hue) * 255.0) as u8,
+                        (hue * 128.0) as u8
+                    );
+                    ui.heading(egui::RichText::new("Multi-Repo Pusher").size(28.0).color(color));
+                    
+                    // Theme switcher
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let theme_button = egui::Button::new(
+                            egui::RichText::new(if self.dark_mode { "☀️ Light" } else { "🌙 Dark" })
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(90, 90, 90))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 180)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(80.0, 25.0));
+                        
+                        if ui.add(theme_button).clicked() {
+                            self.dark_mode = !self.dark_mode;
+                            self.apply_theme(ctx);
+                        }
+                    });
+                });
                 ui.label(egui::RichText::new("Push your code to multiple repositories simultaneously").italics().weak());
             });
             
