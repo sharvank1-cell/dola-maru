@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::core::batch_operations::*;
-    use crate::core::repository::{RepoConfig, RepositoryInfo, RepositoryGroup, AuthType};
+    use crate::core::repository::{RepoConfig, RepositoryInfo, RepositoryGroup};
     
     #[test]
     fn test_push_to_group_repositories() {

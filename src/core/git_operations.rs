@@ -1,6 +1,5 @@
 use crate::core::repository::{RepositoryInfo, RepoConfig, AuthType};
 use crate::core::error_handler::{format_error_result, handle_git_error};
-use crate::core::oauth;
 use git2::Repository;
 use anyhow::Result;
 use std::path::Path;

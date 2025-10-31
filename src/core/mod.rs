@@ -4,6 +4,7 @@ pub mod commit_history;
 pub mod error_handler;
 pub mod oauth;
 pub mod batch_operations;
+pub mod repository_stats;
 
 #[cfg(test)]
 mod repository_tests;
@@ -25,3 +26,6 @@ mod error_handler_tests;
 
 #[cfg(test)]
 mod batch_operations_tests;
+
+#[cfg(test)]
+mod repository_stats_tests;

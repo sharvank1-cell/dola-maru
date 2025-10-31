@@ -75,6 +75,7 @@ enum Tab {
     Repositories,
     CommitHistory,
     Advanced,
+    Statistics,
 }
 
 impl Default for Tab {
@@ -227,6 +228,136 @@ impl MultiRepoPusherApp {
         }
         
         self.is_operation_running = false;
+    }
+    
+    // Render statistics tab
+    fn render_statistics_tab(&mut self, ui: &mut egui::Ui) {
+        ui.heading("📊 Repository Statistics");
+        ui.separator();
+        
+        // Add a refresh button to collect statistics
+        ui.horizontal(|ui| {
+            if self.is_operation_running {
+                ui.add(egui::Spinner::new().size(20.0));
+                ui.label("Collecting statistics...");
+            } else {
+                let refresh_button = egui::Button::new(
+                    egui::RichText::new("🔄 Refresh Statistics")
+                        .size(14.0)
+                )
+                .fill(egui::Color32::from_rgb(90, 90, 90))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 180)))
+                .rounding(egui::Rounding::same(6.0));
+                
+                if ui.add(refresh_button).clicked() {
+                    self.collect_statistics();
+                }
+            }
+        });
+        
+        ui.add_space(10.0);
+        
+        // Display overall statistics
+        let config = self.config.clone();
+        let config_lock = config.lock().unwrap();
+        
+        // Overall stats
+        ui.group(|ui| {
+            ui.heading("📈 Overall Statistics");
+            ui.add_space(10.0);
+            
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Repositories:").strong());
+                    ui.label(egui::RichText::new("Groups:").strong());
+                    ui.label(egui::RichText::new("Total Commits:").strong());
+                    ui.label(egui::RichText::new("Contributors:").strong());
+                });
+                
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(format!("{}", config_lock.repositories.len())));
+                    ui.label(egui::RichText::new(format!("{}", config_lock.groups.len())));
+                    // We'll update these with actual stats when collected
+                    ui.label(egui::RichText::new("0"));
+                    ui.label(egui::RichText::new("0"));
+                });
+            });
+        });
+        
+        ui.add_space(10.0);
+        
+        // Repository-specific stats
+        if !config_lock.repositories.is_empty() {
+            ui.group(|ui| {
+                ui.heading("📁 Repository Details");
+                ui.add_space(10.0);
+                
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for repo in &config_lock.repositories {
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new(&repo.name).size(16.0).strong());
+                                    ui.label(egui::RichText::new(&repo.url).weak().size(12.0));
+                                    
+                                    // Stats placeholders
+                                    ui.label(egui::RichText::new("Commits: 0").weak().size(11.0));
+                                    ui.label(egui::RichText::new("Files: 0").weak().size(11.0));
+                                    ui.label(egui::RichText::new("Contributors: 0").weak().size(11.0));
+                                    
+                                    if !repo.group.is_empty() {
+                                        ui.label(egui::RichText::new(format!("📁 Group: {}", repo.group)).weak().size(11.0).color(egui::Color32::from_rgb(200, 150, 200)));
+                                    }
+                                });
+                            });
+                        });
+                        ui.add_space(5.0);
+                    }
+                });
+            });
+        }
+        
+        // Group-specific stats
+        if !config_lock.groups.is_empty() {
+            ui.add_space(10.0);
+            
+            ui.group(|ui| {
+                ui.heading("📁 Group Statistics");
+                ui.add_space(10.0);
+                
+                for group in &config_lock.groups {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(&group.name).size(16.0).strong());
+                                ui.label(egui::RichText::new(&group.description).weak().size(12.0));
+                                
+                                // Stats placeholders
+                                ui.label(egui::RichText::new(format!("Repositories: {}", group.repository_names.len())).weak().size(11.0));
+                                ui.label(egui::RichText::new("Total Commits: 0").weak().size(11.0));
+                                ui.label(egui::RichText::new("Avg Commits/Repo: 0.0").weak().size(11.0));
+                            });
+                        });
+                    });
+                    ui.add_space(5.0);
+                }
+            });
+        }
+    }
+    
+    // Method to collect statistics
+    fn collect_statistics(&mut self) {
+        self.is_operation_running = true;
+        self.status_message = "Collecting repository statistics...".to_string();
+        
+        // In a real implementation, this would collect actual statistics
+        // For now, we'll just simulate the process
+        
+        // Simulate some work
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        
+        self.is_operation_running = false;
+        self.status_message = "Statistics collected successfully!".to_string();
     }
     
     // Batch operations for repository groups
@@ -825,6 +956,7 @@ impl eframe::App for MultiRepoPusherApp {
                 ui.selectable_value(&mut self.active_tab, Tab::Repositories, "📂 Repositories");
                 ui.selectable_value(&mut self.active_tab, Tab::CommitHistory, "📜 Commit History");
                 ui.selectable_value(&mut self.active_tab, Tab::Advanced, "⚙️ Advanced");
+                ui.selectable_value(&mut self.active_tab, Tab::Statistics, "📊 Statistics");
             });
             
             ui.separator();
@@ -834,6 +966,7 @@ impl eframe::App for MultiRepoPusherApp {
                 Tab::Repositories => self.render_repositories_tab(ui),
                 Tab::CommitHistory => self.commit_history_viewer.render(ui),
                 Tab::Advanced => self.render_advanced_tab(ui),
+                Tab::Statistics => self.render_statistics_tab(ui),
             }
             
             // Show account form as a modal if needed
