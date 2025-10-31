@@ -60,7 +60,7 @@ fn run_gui(config: Arc<Mutex<RepoConfig>>) -> Result<()> {
     eframe::run_native(
         "संधि",
         native_options,
-        Box::new(|cc| Box::new(gui::app::MultiRepoPusherApp::new(cc, config))),
+        Box::new(move |cc| Box::new(gui::app::MultiRepoPusherApp::new(cc, config, save_repo_config))),
     )
     .map_err(|e| anyhow::anyhow!("Failed to start GUI: {}", e))
 }
@@ -69,4 +69,10 @@ fn load_repo_config() -> Result<RepoConfig> {
     let config_str = fs::read_to_string("repos.json")?;
     let config: RepoConfig = serde_json::from_str(&config_str)?;
     Ok(config)
+}
+
+fn save_repo_config(config: &RepoConfig) -> Result<()> {
+    let config_str = serde_json::to_string_pretty(config)?;
+    fs::write("repos.json", config_str)?;
+    Ok(())
 }

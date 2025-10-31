@@ -15,10 +15,14 @@ use crate::core::batch_operations::{
     pull_from_group_repositories,
     fetch_from_group_repositories
 };
+use crate::core::repository_comparison::generate_repository_diff;
 // GitOperationError import removed as it's not currently used
 use crate::gui::commit_history_viewer::CommitHistoryViewer;
 use std::sync::{Arc, Mutex};
 use webbrowser;
+
+// Type alias for the save function
+type SaveConfigFn = fn(&RepoConfig) -> anyhow::Result<()>;
 
 pub struct MultiRepoPusherApp {
     config: Arc<Mutex<RepoConfig>>,
@@ -71,6 +75,16 @@ pub struct MultiRepoPusherApp {
     search_text: String,
     filter_by_group: String,
     filter_by_auth_type: Option<AuthType>,
+    // Theme field
+    dark_mode: bool,
+    // Save function for backup/restore
+    save_config_fn: SaveConfigFn,
+    // Repository comparison fields
+    selected_repo_for_diff: usize,
+    diff_branch1: String,
+    diff_branch2: String,
+    diff_content: String,
+    show_diff_viewer: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -89,7 +103,7 @@ impl Default for Tab {
 }
 
 impl MultiRepoPusherApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, config: Arc<Mutex<RepoConfig>>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, config: Arc<Mutex<RepoConfig>>, save_config_fn: SaveConfigFn) -> Self {
         // Customize the look of the GUI with premium styling
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = egui::Color32::from_rgb(25, 25, 35); // Deep dark background
@@ -162,6 +176,16 @@ impl MultiRepoPusherApp {
             search_text: String::new(),
             filter_by_group: String::new(),
             filter_by_auth_type: None,
+            // Theme field
+            dark_mode: true,
+            // Save function for backup/restore
+            save_config_fn,
+            // Repository comparison fields
+            selected_repo_for_diff: 0,
+            diff_branch1: "main".to_string(),
+            diff_branch2: "develop".to_string(),
+            diff_content: String::new(),
+            show_diff_viewer: false,
         }
     }
     
@@ -366,6 +390,39 @@ impl MultiRepoPusherApp {
         
         self.is_operation_running = false;
         self.status_message = "Statistics collected successfully!".to_string();
+    }
+    
+    // Method to apply theme based on current setting
+    fn apply_theme(&mut self, ctx: &egui::Context) {
+        if self.dark_mode {
+            // Dark theme
+            let mut visuals = egui::Visuals::dark();
+            visuals.panel_fill = egui::Color32::from_rgb(25, 25, 35); // Deep dark background
+            visuals.window_fill = egui::Color32::from_rgb(35, 35, 50); // Slightly lighter window
+            visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 70, 100));
+            visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(40, 40, 60);
+            visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::from_rgb(200, 200, 220);
+            visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(55, 55, 80);
+            visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(80, 80, 130);
+            visuals.widgets.active.bg_fill = egui::Color32::from_rgb(100, 100, 180);
+            visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
+            visuals.selection.bg_fill = egui::Color32::from_rgb(90, 90, 150);
+            ctx.set_visuals(visuals);
+        } else {
+            // Light theme
+            let mut visuals = egui::Visuals::light();
+            visuals.panel_fill = egui::Color32::from_rgb(240, 240, 250); // Light background
+            visuals.window_fill = egui::Color32::from_rgb(255, 255, 255); // White window
+            visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 220));
+            visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(230, 230, 240);
+            visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::from_rgb(50, 50, 70);
+            visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(220, 220, 235);
+            visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(180, 180, 210);
+            visuals.widgets.active.bg_fill = egui::Color32::from_rgb(100, 100, 180);
+            visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
+            visuals.selection.bg_fill = egui::Color32::from_rgb(120, 120, 190);
+            ctx.set_visuals(visuals);
+        }
     }
     
     // Batch operations for repository groups
@@ -780,6 +837,9 @@ impl MultiRepoPusherApp {
 
 impl eframe::App for MultiRepoPusherApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Apply theme
+        self.apply_theme(ctx);
+        
         // Update animation timer
         self.animation_timer += ctx.input(|i| i.stable_dt);
         
@@ -940,14 +1000,33 @@ impl eframe::App for MultiRepoPusherApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Header with title and styling
             ui.vertical_centered(|ui| {
-                // Animated title with gradient effect
-                let hue = (self.animation_timer * 0.5).sin() * 0.5 + 0.5;
-                let color = egui::Color32::from_rgb(
-                    (hue * 255.0) as u8,
-                    ((1.0 - hue) * 255.0) as u8,
-                    (hue * 128.0) as u8
-                );
-                ui.heading(egui::RichText::new("Multi-Repo Pusher").size(28.0).color(color));
+                ui.horizontal(|ui| {
+                    // Animated title with gradient effect
+                    let hue = (self.animation_timer * 0.5).sin() * 0.5 + 0.5;
+                    let color = egui::Color32::from_rgb(
+                        (hue * 255.0) as u8,
+                        ((1.0 - hue) * 255.0) as u8,
+                        (hue * 128.0) as u8
+                    );
+                    ui.heading(egui::RichText::new("Multi-Repo Pusher").size(28.0).color(color));
+                    
+                    // Theme switcher
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let theme_button = egui::Button::new(
+                            egui::RichText::new(if self.dark_mode { "☀️ Light" } else { "🌙 Dark" })
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(90, 90, 90))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 180)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(80.0, 25.0));
+                        
+                        if ui.add(theme_button).clicked() {
+                            self.dark_mode = !self.dark_mode;
+                            self.apply_theme(ctx);
+                        }
+                    });
+                });
                 ui.label(egui::RichText::new("Push your code to multiple repositories simultaneously").italics().weak());
             });
             
@@ -979,6 +1058,9 @@ impl eframe::App for MultiRepoPusherApp {
             
             // Show account form as a modal if needed
             self.render_account_modal(ctx);
+            
+            // Show diff viewer modal if needed
+            self.render_diff_viewer(ctx);
             
             // Results section with improved styling
             if !self.operation_results.is_empty() {
@@ -1498,6 +1580,96 @@ impl MultiRepoPusherApp {
             
             ui.add_space(15.0);
             
+            // Repository diff comparison section
+            ui.separator();
+            ui.heading("🔍 Repository Diff Comparison");
+            
+            ui.add_space(10.0);
+            
+            let config = self.config.clone();
+            let repos = config.lock().unwrap().repositories.clone();
+            
+            if !repos.is_empty() {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Repository:").strong().size(14.0));
+                        egui::ComboBox::from_id_source("diff_repo_selection")
+                            .selected_text(if self.selected_repo_for_diff < repos.len() { 
+                                &repos[self.selected_repo_for_diff].name 
+                            } else { 
+                                "Select a repository" 
+                            })
+                            .show_ui(ui, |ui| {
+                                for (i, repo) in repos.iter().enumerate() {
+                                    ui.selectable_value(&mut self.selected_repo_for_diff, i, &repo.name);
+                                }
+                            });
+                    });
+                    
+                    ui.add_space(8.0);
+                    
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Branch 1:").strong().size(14.0));
+                        ui.add_sized([ui.available_width() * 0.4, 25.0], egui::TextEdit::singleline(&mut self.diff_branch1).hint_text("main"));
+                        
+                        ui.label(egui::RichText::new("Branch 2:").strong().size(14.0));
+                        ui.add_sized([ui.available_width() * 0.4, 25.0], egui::TextEdit::singleline(&mut self.diff_branch2).hint_text("develop"));
+                    });
+                    
+                    ui.add_space(10.0);
+                    
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let diff_button = egui::Button::new(
+                                egui::RichText::new("🔍 Generate Diff")
+                                    .size(14.0)
+                            )
+                            .fill(egui::Color32::from_rgb(100, 150, 100))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 230, 180)))
+                            .rounding(egui::Rounding::same(6.0))
+                            .min_size(egui::Vec2::new(120.0, 30.0));
+                            
+                            if ui.add(diff_button).clicked() {
+                                match self.generate_repository_diff() {
+                                    Ok(()) => {
+                                        self.status_message = "Diff generated successfully!".to_string();
+                                    },
+                                    Err(e) => {
+                                        self.status_message = format!("Failed to generate diff: {}", e);
+                                    }
+                                }
+                            }
+                            
+                            ui.add_space(10.0);
+                            
+                            let wd_diff_button = egui::Button::new(
+                                egui::RichText::new("🔍 Working Dir Diff")
+                                    .size(14.0)
+                            )
+                            .fill(egui::Color32::from_rgb(100, 150, 100))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 230, 180)))
+                            .rounding(egui::Rounding::same(6.0))
+                            .min_size(egui::Vec2::new(120.0, 30.0));
+                            
+                            if ui.add(wd_diff_button).clicked() {
+                                match self.generate_working_directory_diff() {
+                                    Ok(()) => {
+                                        self.status_message = "Working directory diff generated successfully!".to_string();
+                                    },
+                                    Err(e) => {
+                                        self.status_message = format!("Failed to generate working directory diff: {}", e);
+                                    }
+                                }
+                            }
+                        });
+                    });
+                });
+            } else {
+                ui.label(egui::RichText::new("No repositories available for diff comparison.").weak().size(13.0));
+            }
+            
+            ui.add_space(15.0);
+            
             // Add new repository form with premium styling
             ui.separator();
             ui.heading("➕ Add New Repository");
@@ -1754,6 +1926,51 @@ impl MultiRepoPusherApp {
         });
     }
     
+    // Render diff viewer modal
+    fn render_diff_viewer(&mut self, ctx: &egui::Context) {
+        if self.show_diff_viewer {
+            let mut open = self.show_diff_viewer;
+            egui::Window::new("🔍 Repository Diff Viewer")
+                .open(&mut open)
+                .resizable(true)
+                .default_width(600.0)
+                .default_height(400.0)
+                .show(ctx, |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("Repository Diff");
+                        ui.separator();
+                        
+                        // Display diff content in a scrollable area
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false; 2])
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                ui.monospace(&self.diff_content);
+                            });
+                        
+                        ui.add_space(10.0);
+                        
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let close_button = egui::Button::new(
+                                egui::RichText::new("Close")
+                                    .size(14.0)
+                            )
+                            .fill(egui::Color32::from_rgb(120, 120, 120))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
+                            .rounding(egui::Rounding::same(6.0))
+                            .min_size(egui::Vec2::new(80.0, 30.0));
+                            
+                            if ui.add(close_button).clicked() {
+                                self.show_diff_viewer = false;
+                                self.diff_content.clear();
+                            }
+                        });
+                    });
+                });
+            self.show_diff_viewer = open;
+        }
+    }
+    
     // New function to handle the group modal rendering
     fn render_group_modal(&mut self, ctx: &egui::Context) {
         if self.show_group_form {
@@ -1944,6 +2161,77 @@ impl MultiRepoPusherApp {
                         
                         if ui.add(conflict_button).clicked() && !self.is_operation_running {
                             self.check_merge_conflicts();
+                        }
+                    });
+                });
+            });
+            
+            ui.separator();
+            
+            // Backup and Restore functionality
+            ui.vertical(|ui| {
+                ui.heading("💾 Backup & Restore");
+                
+                ui.add_space(10.0);
+                
+                ui.label(egui::RichText::new("Backup your repository configuration to a file or restore from a backup.").weak().size(12.0));
+                
+                ui.add_space(10.0);
+                
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.is_operation_running {
+                            ui.add(egui::Spinner::new().size(16.0));
+                        }
+                        
+                        let save_button = egui::Button::new(
+                            egui::RichText::new("💾 Save Current Config")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(100, 150, 100))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 230, 180)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(180.0, 35.0));
+                        
+                        if ui.add(save_button).clicked() && !self.is_operation_running {
+                            match self.save_current_configuration() {
+                                Ok(()) => {
+                                    self.status_message = "Configuration saved successfully!".to_string();
+                                },
+                                Err(e) => {
+                                    self.status_message = format!("Failed to save configuration: {}", e);
+                                }
+                            }
+                        }
+                        
+                        let restore_button = egui::Button::new(
+                            egui::RichText::new("📤 Restore Config")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(150, 150, 100))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(230, 230, 180)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(150.0, 35.0));
+                        
+                        if ui.add(restore_button).clicked() && !self.is_operation_running {
+                            // For now, we'll just show a message
+                            // In a real implementation, you would use a file dialog to select the backup file
+                            self.status_message = "Restore functionality would open a file dialog to select a backup file.".to_string();
+                        }
+                        
+                        let backup_button = egui::Button::new(
+                            egui::RichText::new("📥 Backup Config")
+                                .size(14.0)
+                        )
+                        .fill(egui::Color32::from_rgb(100, 150, 150))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 230, 230)))
+                        .rounding(egui::Rounding::same(6.0))
+                        .min_size(egui::Vec2::new(150.0, 35.0));
+                        
+                        if ui.add(backup_button).clicked() && !self.is_operation_running {
+                            // For now, we'll just show a message
+                            // In a real implementation, you would use a file dialog to select the backup location
+                            self.status_message = "Backup functionality would open a file dialog to select a backup location.".to_string();
                         }
                     });
                 });
@@ -2258,5 +2546,101 @@ impl MultiRepoPusherApp {
         
         // Clear the code field
         self.oauth_code.clear();
+    }
+    
+    // Backup current configuration to a file
+    fn backup_configuration(&mut self, backup_path: &str) -> Result<(), String> {
+        let config = self.config.lock().unwrap();
+        let config_str = serde_json::to_string_pretty(&*config)
+            .map_err(|e| format!("Failed to serialize configuration: {}", e))?;
+        std::fs::write(backup_path, config_str)
+            .map_err(|e| format!("Failed to write backup file: {}", e))
+    }
+    
+    // Restore configuration from a backup file
+    fn restore_configuration(&mut self, backup_path: &str) -> Result<(), String> {
+        let config_str = std::fs::read_to_string(backup_path)
+            .map_err(|e| format!("Failed to read backup file: {}", e))?;
+        let restored_config: RepoConfig = serde_json::from_str(&config_str)
+            .map_err(|e| format!("Failed to parse backup file: {}", e))?;
+        
+        let mut config = self.config.lock().unwrap();
+        *config = restored_config;
+        Ok(())
+    }
+    
+    // Save current configuration using the provided save function
+    fn save_current_configuration(&mut self) -> Result<(), String> {
+        let config = self.config.lock().unwrap();
+        (self.save_config_fn)(&config)
+            .map_err(|e| format!("Failed to save configuration: {}", e))
+    }
+    
+    // Generate diff for selected repository
+    fn generate_repository_diff(&mut self) -> Result<(), String> {
+        let config = self.config.lock().unwrap();
+        
+        if self.selected_repo_for_diff >= config.repositories.len() {
+            return Err("Invalid repository selection".to_string());
+        }
+        
+        let repo = &config.repositories[self.selected_repo_for_diff];
+        
+        // Try to generate a real diff
+        match generate_repository_diff(repo, ".", &self.diff_branch1, &self.diff_branch2) {
+            Ok(diff) => {
+                self.diff_content = format!(
+                    "Repository: {}\nBranch 1: {}\nBranch 2: {}\n\nFiles changed: {}\nInsertions: {}\nDeletions: {}\n\n{}",
+                    repo.name, self.diff_branch1, self.diff_branch2,
+                    diff.stats.files_changed, diff.stats.insertions, diff.stats.deletions,
+                    diff.diff_content
+                );
+                self.show_diff_viewer = true;
+                Ok(())
+            },
+            Err(e) => {
+                // Fallback to placeholder if diff generation fails
+                self.diff_content = format!(
+                    "Diff for repository: {}\n\nBranch 1: {}\nBranch 2: {}\n\nError generating diff: {}\n\nThis might be because the repository is not cloned locally or the branches don't exist.",
+                    repo.name, self.diff_branch1, self.diff_branch2, e
+                );
+                self.show_diff_viewer = true;
+                Ok(())
+            }
+        }
+    }
+    
+    // Generate working directory diff for selected repository
+    fn generate_working_directory_diff(&mut self) -> Result<(), String> {
+        let config = self.config.lock().unwrap();
+        
+        if self.selected_repo_for_diff >= config.repositories.len() {
+            return Err("Invalid repository selection".to_string());
+        }
+        
+        let repo = &config.repositories[self.selected_repo_for_diff];
+        
+        // Try to generate a real diff between working directory and HEAD
+        match crate::core::repository_comparison::generate_working_directory_diff(repo, ".") {
+            Ok(diff) => {
+                self.diff_content = format!(
+                    "Repository: {}\n\nWorking Directory vs HEAD\n\nFiles changed: {}\nInsertions: {}\nDeletions: {}\n\n{}",
+                    repo.name,
+                    diff.stats.files_changed, diff.stats.insertions, diff.stats.deletions,
+                    diff.diff_content
+                );
+                self.show_diff_viewer = true;
+                Ok(())
+            },
+            Err(e) => {
+                // Fallback to placeholder if diff generation fails
+                self.diff_content = format!(
+                    "Working directory diff for repository: {}\n\nError generating diff: {}\n\nThis might be because the repository is not cloned locally.",
+                    repo.name, e
+                );
+                self.show_diff_viewer = true;
+                Ok(())
+            }
+        }
     }
 }
