@@ -3,10 +3,10 @@
 //! This module provides functionality to compare repositories and generate diffs
 //! between different versions or branches.
 
-use crate::core::repository::{RepositoryInfo, RepoConfig};
+use crate::core::repository::{RepositoryInfo, RepoConfig, RepositoryGroup};
 use anyhow::Result;
 use git2::{Repository, DiffOptions, DiffFormat, DiffDelta, DiffHunk, DiffLine, Oid};
-// use std::path::Path; // Not currently used
+use std::path::Path;
 
 /// Struct to represent differences between repositories
 #[derive(Debug, Clone)]

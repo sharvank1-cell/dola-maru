@@ -30,3 +30,6 @@ mod batch_operations_tests;
 
 #[cfg(test)]
 mod repository_stats_tests;
+
+#[cfg(test)]
+mod repository_comparison_tests;
