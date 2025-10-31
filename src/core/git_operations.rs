@@ -78,12 +78,16 @@ pub fn push_to_remote(repo: &Repository, repo_info: &RepositoryInfo, branch: &st
         },
         AuthType::Default => {
             callbacks.credentials(|_url, username_from_url, _allowed_types| {
-                git2::Cred::ssh_key(
-                    username_from_url.unwrap(),
-                    None,
-                    Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
-                    None,
-                )
+                if let Some(username) = username_from_url {
+                    git2::Cred::ssh_key(
+                        username,
+                        None,
+                        Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
+                        None,
+                    )
+                } else {
+                    git2::Cred::default()
+                }
                 .or_else(|_| git2::Cred::default())
             });
         }
@@ -133,12 +137,16 @@ pub fn pull_from_remote(repo: &Repository, repo_info: &RepositoryInfo, branch: &
         },
         AuthType::Default => {
             callbacks.credentials(|_url, username_from_url, _allowed_types| {
-                git2::Cred::ssh_key(
-                    username_from_url.unwrap(),
-                    None,
-                    Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
-                    None,
-                )
+                if let Some(username) = username_from_url {
+                    git2::Cred::ssh_key(
+                        username,
+                        None,
+                        Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
+                        None,
+                    )
+                } else {
+                    git2::Cred::default()
+                }
                 .or_else(|_| git2::Cred::default())
             });
         }
@@ -213,12 +221,16 @@ pub fn fetch_from_remote(repo: &Repository, repo_info: &RepositoryInfo, branch: 
         },
         AuthType::Default => {
             callbacks.credentials(|_url, username_from_url, _allowed_types| {
-                git2::Cred::ssh_key(
-                    username_from_url.unwrap(),
-                    None,
-                    Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
-                    None,
-                )
+                if let Some(username) = username_from_url {
+                    git2::Cred::ssh_key(
+                        username,
+                        None,
+                        Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
+                        None,
+                    )
+                } else {
+                    git2::Cred::default()
+                }
                 .or_else(|_| git2::Cred::default())
             });
         }
@@ -287,12 +299,16 @@ pub fn create_and_push_tag(repo: &Repository, repo_info: &RepositoryInfo, tag_na
         },
         AuthType::Default => {
             callbacks.credentials(|_url, username_from_url, _allowed_types| {
-                git2::Cred::ssh_key(
-                    username_from_url.unwrap(),
-                    None,
-                    Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
-                    None,
-                )
+                if let Some(username) = username_from_url {
+                    git2::Cred::ssh_key(
+                        username,
+                        None,
+                        Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
+                        None,
+                    )
+                } else {
+                    git2::Cred::default()
+                }
                 .or_else(|_| git2::Cred::default())
             });
         }
@@ -467,12 +483,16 @@ pub fn clone_repository(repo_info: &RepositoryInfo, destination_path: &str) -> R
         },
         AuthType::Default => {
             callbacks.credentials(|_url, username_from_url, _allowed_types| {
-                git2::Cred::ssh_key(
-                    username_from_url.unwrap(),
-                    None,
-                    Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
-                    None,
-                )
+                if let Some(username) = username_from_url {
+                    git2::Cred::ssh_key(
+                        username,
+                        None,
+                        Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap_or_default())),
+                        None,
+                    )
+                } else {
+                    git2::Cred::default()
+                }
                 .or_else(|_| git2::Cred::default())
             });
         }
